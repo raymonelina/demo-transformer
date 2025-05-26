@@ -3,6 +3,10 @@
 A simplified implementation of the Transformer Encoder-Decoder architecture for sequence-to-sequence tasks.
 
 ## Installation
+    ```bash
+    poetry install
+    ```
+    This will create a virtual environment and install all necessary dependencies, including `torch`.
 
 ## Usage
 
