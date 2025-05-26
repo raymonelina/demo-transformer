@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/ # Poetry's default virtual environment location
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.vscode/ # VS Code specific files
+
+# Poetry
+.python-version # created by poetry env use in some cases
+
+# Operating System
+.DS_Store
+Thumbs.db
+
+# IDEs
+.idea/ # IntelliJ IDEA / PyCharm
+*.iml
+
+# Data files
+*.pt
+*.pth
+*.safetensors
+*.bin
