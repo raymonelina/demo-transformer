@@ -2,8 +2,8 @@
 
 import torch
 import torch.nn as nn
-from transformer import Transformer
-from inference_utils import greedy_decode
+from demo_transformer.transformer import Transformer
+from demo_transformer.inference_utils import greedy_decode
 
 if __name__ == "__main__":
     # Define model parameters
