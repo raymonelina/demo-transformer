@@ -3,21 +3,27 @@ name = "demo-transformer"
 version = "0.2.0"
 description = "A comprehensive implementation of the Transformer Encoder-Decoder architecture for sequence-to-sequence tasks"
 authors = [
-    {name = "Zhurun Zhang",email = "zhurunz@amazon.com"}
+    {name = "Zhurun Zhang", email = "zhurunz@amazon.com"}
 ]
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "torch (>=2.7.0,<3.0.0)",
-    "numpy (>=2.2.6,<3.0.0)"
+    "torch>=2.7.0,<3.0.0",
+    "numpy>=2.2.6,<3.0.0"
 ]
 
-[tool.poetry]
-packages = [{include = "demo_transformer", from = "src"}]
+[project.urls]
+Repository = "https://github.com/zhurunz/demo-transformer"
 
 [build-system]
-requires = ["poetry-core>=2.0.0,<3.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [project.optional-dependencies]
 dev = [

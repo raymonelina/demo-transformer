@@ -4,17 +4,20 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
-.venv/ # Poetry's default virtual environment location
+.venv/
 venv/
 env/
 *.egg-info/
+dist/
+build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .vscode/ # VS Code specific files
 
-# Poetry
-.python-version # created by poetry env use in some cases
+# uv
+.uv/
+.python-version
 
 # Operating System
 .DS_Store

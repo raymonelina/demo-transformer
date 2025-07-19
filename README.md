@@ -18,11 +18,22 @@ A comprehensive implementation of the Transformer Encoder-Decoder architecture f
 
 ## Installation
 
+You can install the package using uv:
+
 ```bash
-poetry install
+uv venv
+uv pip install -e .
 ```
 
-This will create a virtual environment and install all necessary dependencies, including `torch`.
+For development dependencies:
+
+```bash
+uv pip install -e ".[dev]"
+# or
+uv pip install -r requirements-dev.txt
+```
+
+This will install all necessary dependencies, including `torch`.
 
 ## Usage
 
@@ -98,7 +109,7 @@ sampled_output = inference.sample_decode(
 You can run the example script to see a complete demonstration:
 
 ```bash
-poetry run python examples/basic_usage.py
+python examples/basic_usage.py
 ```
 
 ## Components
