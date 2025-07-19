@@ -1,7 +1,7 @@
 [project]
 name = "demo-transformer"
-version = "0.1.0"
-description = ""
+version = "0.2.0"
+description = "A comprehensive implementation of the Transformer Encoder-Decoder architecture for sequence-to-sequence tasks"
 authors = [
     {name = "Zhurun Zhang",email = "zhurunz@amazon.com"}
 ]
@@ -15,7 +15,34 @@ dependencies = [
 [tool.poetry]
 packages = [{include = "demo_transformer", from = "src"}]
 
-
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "mypy>=1.0.0",
+    "flake8>=6.0.0",
+]
+
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = "torch.*"
+ignore_missing_imports = true

@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 from demo_transformer.transformer import Transformer
-from demo_transformer.inference_utils import greedy_decode
+from demo_transformer.inference_utils import greedy_decode, beam_search_decode
 
 if __name__ == "__main__":
     # Define model parameters
@@ -102,4 +102,38 @@ if __name__ == "__main__":
 
     print(f"\nFinal generated sequence (IDs, excluding SOS): {generated_ids}")
     print(f"Generated sequence length: {len(generated_ids)}")
-    print("Inference simulation completed.")
+    print("Greedy inference simulation completed.")
+    
+    # --- 5. Simulate Beam Search Inference ---
+    print("\n--- Simulating Beam Search Inference ---")
+    
+    BEAM_SIZE = 3
+    print(f"Using beam size: {BEAM_SIZE}")
+    
+    beam_results = beam_search_decode(
+        transformer_model,
+        single_src_ids,
+        single_src_padding_mask,
+        start_token_id=SOS_TOKEN_ID,
+        end_token_id=EOS_TOKEN_ID,
+        max_output_len=MAX_GENERATION_LEN,
+        beam_size=BEAM_SIZE,
+        device=device,
+    )
+    
+    print("\nBeam search results (top sequences and their scores):")
+    for i, (sequence, score) in enumerate(beam_results[:BEAM_SIZE]):
+        print(f"  Beam {i+1}: Score={score:.4f}, Sequence={sequence}")
+    
+    print("\nComparing top beam search result with greedy search:")
+    if beam_results:
+        top_beam_sequence = beam_results[0][0]
+        print(f"  Greedy: {generated_ids}")
+        print(f"  Beam:   {top_beam_sequence}")
+        
+        if generated_ids == top_beam_sequence:
+            print("  Results match! (This can happen with random initialization)")
+        else:
+            print("  Results differ (beam search typically finds better sequences)")
+    
+    print("Inference simulations completed.")
