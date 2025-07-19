@@ -43,6 +43,7 @@ class Transformer(nn.Module):
             dropout_rate=config.dropout_rate,
             pre_norm=config.pre_norm,
             use_relative_pos=config.use_relative_pos,
+            use_gradient_checkpointing=config.use_gradient_checkpointing,
         )
         
         self.decoder = TransformerDecoder(
@@ -55,6 +56,7 @@ class Transformer(nn.Module):
             dropout_rate=config.dropout_rate,
             pre_norm=config.pre_norm,
             use_relative_pos=config.use_relative_pos,
+            use_gradient_checkpointing=config.use_gradient_checkpointing,
         )
         
         # Implement weight tying if configured

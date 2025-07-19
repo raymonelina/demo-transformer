@@ -2,7 +2,8 @@
 
 import torch
 import torch.nn as nn
-from typing import Optional
+import torch.utils.checkpoint
+from typing import Optional, Tuple
 
 from .attention import MultiHeadAttention
 from .relative_positional_encoding import RelativeMultiHeadAttention
@@ -90,6 +91,7 @@ class TransformerEncoder(nn.Module):
         dropout_rate: float = 0.1,
         pre_norm: bool = True,
         use_relative_pos: bool = False,
+        use_gradient_checkpointing: bool = False,
     ):
         """
         Initialize a transformer encoder.
@@ -118,7 +120,14 @@ class TransformerEncoder(nn.Module):
         
         # Final layer norm for pre-norm architecture
         self.final_norm = nn.LayerNorm(embed_dim) if pre_norm else None
+        
+        # Gradient checkpointing to save memory
+        self.use_gradient_checkpointing = use_gradient_checkpointing
 
+    def _layer_forward(self, layer: nn.Module, x: torch.Tensor, src_padding_mask: Optional[torch.Tensor]) -> torch.Tensor:
+        """Helper function for gradient checkpointing."""
+        return layer(x, src_padding_mask)
+    
     def forward(self, input_ids: torch.Tensor, src_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Forward pass of the encoder.
@@ -134,8 +143,13 @@ class TransformerEncoder(nn.Module):
         embeddings = self.positional_encoding(embeddings)
         x = self.dropout(embeddings)
 
-        for layer in self.encoder_layers:
-            x = layer(x, src_padding_mask)
+        for i, layer in enumerate(self.encoder_layers):
+            if self.use_gradient_checkpointing and self.training:
+                x = torch.utils.checkpoint.checkpoint(
+                    self._layer_forward, layer, x, src_padding_mask
+                )
+            else:
+                x = layer(x, src_padding_mask)
             
         # Apply final normalization if using pre-norm
         if self.final_norm is not None:

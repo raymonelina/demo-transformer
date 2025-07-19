@@ -15,6 +15,8 @@ A comprehensive implementation of the Transformer Encoder-Decoder architecture f
 - Model saving and loading functionality
 - Pre-layer normalization option for more stable training
 - Weight tying option for parameter efficiency
+- Relative positional encoding for better handling of variable-length sequences
+- Gradient checkpointing for memory-efficient training of large models
 
 ## Installation
 
@@ -54,6 +56,8 @@ config = TransformerConfig(
     max_seq_len=512,
     src_vocab_size=32000,
     tgt_vocab_size=32000,
+    use_relative_pos=False,  # Whether to use relative positional encoding
+    use_gradient_checkpointing=False,  # Whether to use gradient checkpointing
 )
 
 # Initialize the model

@@ -33,6 +33,7 @@ class TransformerConfig:
     weight_tying: bool = True
     pre_norm: bool = True  # Pre-layer normalization
     use_relative_pos: bool = False  # Whether to use relative positional encoding
+    use_gradient_checkpointing: bool = False  # Whether to use gradient checkpointing to save memory
     
     def __post_init__(self):
         """Validate and set default values after initialization."""

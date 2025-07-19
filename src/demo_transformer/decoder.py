@@ -2,7 +2,8 @@
 
 import torch
 import torch.nn as nn
-from typing import Optional
+import torch.utils.checkpoint
+from typing import Optional, Tuple
 
 from .attention import MultiHeadAttention
 from .relative_positional_encoding import RelativeMultiHeadAttention
@@ -111,6 +112,7 @@ class TransformerDecoder(nn.Module):
         dropout_rate: float = 0.1,
         pre_norm: bool = True,
         use_relative_pos: bool = False,
+        use_gradient_checkpointing: bool = False,
     ):
         """
         Initialize a transformer decoder.
@@ -142,6 +144,9 @@ class TransformerDecoder(nn.Module):
         
         # Final layer norm for pre-norm architecture
         self.final_norm = nn.LayerNorm(embed_dim) if pre_norm else None
+        
+        # Gradient checkpointing to save memory
+        self.use_gradient_checkpointing = use_gradient_checkpointing
 
     def generate_square_subsequent_mask(
         self, sz: int, device: torch.device
@@ -160,6 +165,11 @@ class TransformerDecoder(nn.Module):
         mask = ~torch.tril(mask)  # Lower triangular part is False (not masked)
         return mask.unsqueeze(0).unsqueeze(0)
 
+    def _layer_forward(self, layer: nn.Module, x: torch.Tensor, encoder_output: torch.Tensor, 
+                     tgt_mask: torch.Tensor, src_mask: Optional[torch.Tensor]) -> torch.Tensor:
+        """Helper function for gradient checkpointing."""
+        return layer(x, encoder_output, tgt_mask=tgt_mask, src_mask=src_mask)
+    
     def forward(
         self,
         target_ids: torch.Tensor,
@@ -195,8 +205,13 @@ class TransformerDecoder(nn.Module):
         x = self.positional_encoding(target_embeddings)
         x = self.dropout(x)
 
-        for layer in self.decoder_layers:
-            x = layer(x, encoder_output, tgt_mask=tgt_mask, src_mask=src_padding_mask)
+        for i, layer in enumerate(self.decoder_layers):
+            if self.use_gradient_checkpointing and self.training:
+                x = torch.utils.checkpoint.checkpoint(
+                    self._layer_forward, layer, x, encoder_output, tgt_mask, src_padding_mask
+                )
+            else:
+                x = layer(x, encoder_output, tgt_mask=tgt_mask, src_mask=src_padding_mask)
             
         # Apply final normalization if using pre-norm
         if self.final_norm is not None:
