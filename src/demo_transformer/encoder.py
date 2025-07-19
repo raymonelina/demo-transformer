@@ -21,7 +21,7 @@ class EncoderLayer(nn.Module):
     def __init__(
         self, embed_dim: int, num_heads: int, ff_dim: int, dropout_rate: float = 0.1,
         pre_norm: bool = True, use_relative_pos: bool = False, max_seq_len: int = 512,
-        debug_mode: bool = False
+        debug_mode: bool = False, store_attention: bool = False
     ):
         """
         Initialize an encoder layer.
@@ -35,10 +35,13 @@ class EncoderLayer(nn.Module):
         """
         super().__init__()
         self.debug_mode = debug_mode
+        self.store_attention = store_attention
         if use_relative_pos:
-            self.self_attn = RelativeMultiHeadAttention(embed_dim, num_heads, max_seq_len, debug_mode=debug_mode)
+            self.self_attn = RelativeMultiHeadAttention(embed_dim, num_heads, max_seq_len, 
+                                                      debug_mode=debug_mode, store_attention=store_attention)
         else:
-            self.self_attn = MultiHeadAttention(embed_dim, num_heads, debug_mode=debug_mode)
+            self.self_attn = MultiHeadAttention(embed_dim, num_heads, 
+                                              debug_mode=debug_mode, store_attention=store_attention)
         self.norm1 = nn.LayerNorm(embed_dim)
         self.dropout1 = nn.Dropout(dropout_rate)
 
@@ -99,6 +102,7 @@ class TransformerEncoder(nn.Module):
         use_relative_pos: bool = False,
         use_gradient_checkpointing: bool = False,
         debug_mode: bool = False,
+        store_attention: bool = False,
     ):
         """
         Initialize a transformer encoder.
@@ -119,7 +123,8 @@ class TransformerEncoder(nn.Module):
         self.positional_encoding = PositionalEncoding(embed_dim, max_seq_len)
         self.encoder_layers = nn.ModuleList(
             [
-                EncoderLayer(embed_dim, num_heads, ff_dim, dropout_rate, pre_norm, use_relative_pos, max_seq_len, debug_mode)
+                EncoderLayer(embed_dim, num_heads, ff_dim, dropout_rate, pre_norm, use_relative_pos, 
+                           max_seq_len, debug_mode, store_attention)
                 for _ in range(num_layers)
             ]
         )
@@ -131,8 +136,9 @@ class TransformerEncoder(nn.Module):
         # Gradient checkpointing to save memory
         self.use_gradient_checkpointing = use_gradient_checkpointing
         
-        # Debug mode
+        # Debug mode and attention storage
         self.debug_mode = debug_mode
+        self.store_attention = store_attention
 
     def _layer_forward(self, layer: nn.Module, x: torch.Tensor, src_padding_mask: Optional[torch.Tensor]) -> torch.Tensor:
         """Helper function for gradient checkpointing."""

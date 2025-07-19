@@ -14,6 +14,7 @@ from .training import TransformerTrainer, LabelSmoothingLoss, get_transformer_sc
 from .inference_utils import TransformerInference
 from .data import TransformerDataset, TransformerCollator, create_dataloaders
 from .debug_utils import debug_print
+from .visualization import plot_attention_weights, plot_embeddings_pca, plot_attention_heads
 
 __version__ = "0.2.0"
 
@@ -35,4 +36,7 @@ __all__ = [
     "TransformerCollator",
     "create_dataloaders",
     "debug_print",
+    "plot_attention_weights",
+    "plot_embeddings_pca",
+    "plot_attention_heads",
 ]

@@ -2,12 +2,13 @@
 
 import torch
 import torch.nn as nn
-from typing import Optional, Dict, Any, Union
+from typing import Optional, Dict, Any, Union, List, Tuple
 
 from .encoder import TransformerEncoder
 from .decoder import TransformerDecoder
 from .config import TransformerConfig
 from .debug_utils import debug_print
+from .visualization import plot_attention_weights, plot_embeddings_pca, plot_attention_heads
 
 
 class Transformer(nn.Module):
@@ -33,6 +34,9 @@ class Transformer(nn.Module):
         
         self.config = config
         
+        # Store attention weights for visualization
+        self.store_attention = getattr(config, 'store_attention', False)
+        
         # Create encoder and decoder
         self.encoder = TransformerEncoder(
             vocab_size=config.src_vocab_size,
@@ -46,6 +50,7 @@ class Transformer(nn.Module):
             use_relative_pos=config.use_relative_pos,
             use_gradient_checkpointing=config.use_gradient_checkpointing,
             debug_mode=config.debug_mode,
+            store_attention=store_attention,
         )
         
         self.decoder = TransformerDecoder(
@@ -60,6 +65,7 @@ class Transformer(nn.Module):
             use_relative_pos=config.use_relative_pos,
             use_gradient_checkpointing=config.use_gradient_checkpointing,
             debug_mode=config.debug_mode,
+            store_attention=store_attention,
         )
         
         # Implement weight tying if configured
@@ -131,3 +137,171 @@ class Transformer(nn.Module):
             'model_state_dict': self.state_dict()
         }
         torch.save(checkpoint, model_path)
+        
+    def get_encoder_attention_weights(self) -> List[torch.Tensor]:
+        """Get attention weights from all encoder layers.
+        
+        Returns:
+            List of attention weight tensors, one per layer
+        """
+        if not self.store_attention:
+            raise ValueError("Attention weights not stored. Initialize with store_attention=True")
+            
+        attention_weights = []
+        for i, layer in enumerate(self.encoder.encoder_layers):
+            attention_weights.append(layer.self_attn.last_attention_weights)
+            
+        return attention_weights
+    
+    def get_decoder_self_attention_weights(self) -> List[torch.Tensor]:
+        """Get self-attention weights from all decoder layers.
+        
+        Returns:
+            List of attention weight tensors, one per layer
+        """
+        if not self.store_attention:
+            raise ValueError("Attention weights not stored. Initialize with store_attention=True")
+            
+        attention_weights = []
+        for i, layer in enumerate(self.decoder.decoder_layers):
+            attention_weights.append(layer.self_attn.last_attention_weights)
+            
+        return attention_weights
+    
+    def get_decoder_cross_attention_weights(self) -> List[torch.Tensor]:
+        """Get cross-attention weights from all decoder layers.
+        
+        Returns:
+            List of attention weight tensors, one per layer
+        """
+        if not self.store_attention:
+            raise ValueError("Attention weights not stored. Initialize with store_attention=True")
+            
+        attention_weights = []
+        for i, layer in enumerate(self.decoder.decoder_layers):
+            attention_weights.append(layer.cross_attn.last_attention_weights)
+            
+        return attention_weights
+    
+    def visualize_encoder_attention(self, layer_idx: int = 0, head_idx: Optional[int] = None, 
+                                  tokens: Optional[List[str]] = None, **kwargs) -> plt.Figure:
+        """Visualize encoder self-attention weights.
+        
+        Args:
+            layer_idx: Index of the encoder layer to visualize
+            head_idx: Index of the attention head to visualize (None for average)
+            tokens: Optional list of token strings for axis labels
+            **kwargs: Additional arguments to pass to plot_attention_weights
+            
+        Returns:
+            Matplotlib figure object
+        """
+        attention_weights = self.get_encoder_attention_weights()
+        return plot_attention_weights(
+            attention_weights[layer_idx],
+            tokens=tokens,
+            title="Encoder Self-Attention",
+            layer_idx=layer_idx,
+            head_idx=head_idx,
+            **kwargs
+        )
+    
+    def visualize_decoder_self_attention(self, layer_idx: int = 0, head_idx: Optional[int] = None, 
+                                        tokens: Optional[List[str]] = None, **kwargs) -> plt.Figure:
+        """Visualize decoder self-attention weights.
+        
+        Args:
+            layer_idx: Index of the decoder layer to visualize
+            head_idx: Index of the attention head to visualize (None for average)
+            tokens: Optional list of token strings for axis labels
+            **kwargs: Additional arguments to pass to plot_attention_weights
+            
+        Returns:
+            Matplotlib figure object
+        """
+        attention_weights = self.get_decoder_self_attention_weights()
+        return plot_attention_weights(
+            attention_weights[layer_idx],
+            tokens=tokens,
+            title="Decoder Self-Attention",
+            layer_idx=layer_idx,
+            head_idx=head_idx,
+            **kwargs
+        )
+    
+    def visualize_decoder_cross_attention(self, layer_idx: int = 0, head_idx: Optional[int] = None, 
+                                         src_tokens: Optional[List[str]] = None, 
+                                         tgt_tokens: Optional[List[str]] = None, 
+                                         **kwargs) -> plt.Figure:
+        """Visualize decoder cross-attention weights.
+        
+        Args:
+            layer_idx: Index of the decoder layer to visualize
+            head_idx: Index of the attention head to visualize (None for average)
+            src_tokens: Optional list of source token strings for x-axis labels
+            tgt_tokens: Optional list of target token strings for y-axis labels
+            **kwargs: Additional arguments to pass to plot_attention_weights
+            
+        Returns:
+            Matplotlib figure object
+        """
+        attention_weights = self.get_decoder_cross_attention_weights()
+        return plot_attention_weights(
+            attention_weights[layer_idx],
+            tokens=src_tokens if tgt_tokens is None else tgt_tokens,  # Use one set if the other is missing
+            title="Decoder Cross-Attention",
+            layer_idx=layer_idx,
+            head_idx=head_idx,
+            **kwargs
+        )
+    
+    def visualize_encoder_embeddings(self, input_ids: torch.Tensor, 
+                                   tokens: Optional[List[str]] = None, **kwargs) -> plt.Figure:
+        """Visualize encoder token embeddings using PCA.
+        
+        Args:
+            input_ids: Input token IDs [batch_size, seq_len]
+            tokens: Optional list of token strings for labels
+            **kwargs: Additional arguments to pass to plot_embeddings_pca
+            
+        Returns:
+            Matplotlib figure object
+        """
+        with torch.no_grad():
+            embeddings = self.encoder.token_embedding(input_ids[0])  # Take first batch
+        
+        return plot_embeddings_pca(
+            embeddings,
+            tokens=tokens,
+            title="Encoder Token Embeddings",
+            **kwargs
+        )
+    
+    def visualize_attention_heads(self, attention_type: str = "encoder", layer_idx: int = 0, 
+                                tokens: Optional[List[str]] = None, **kwargs) -> plt.Figure:
+        """Visualize multiple attention heads in a grid.
+        
+        Args:
+            attention_type: Type of attention to visualize ("encoder", "decoder_self", or "decoder_cross")
+            layer_idx: Index of the layer to visualize
+            tokens: Optional list of token strings for axis labels
+            **kwargs: Additional arguments to pass to plot_attention_heads
+            
+        Returns:
+            Matplotlib figure object
+        """
+        if attention_type == "encoder":
+            attention_weights = self.get_encoder_attention_weights()[layer_idx]
+        elif attention_type == "decoder_self":
+            attention_weights = self.get_decoder_self_attention_weights()[layer_idx]
+        elif attention_type == "decoder_cross":
+            attention_weights = self.get_decoder_cross_attention_weights()[layer_idx]
+        else:
+            raise ValueError(f"Unknown attention type: {attention_type}")
+        
+        return plot_attention_heads(
+            attention_weights,
+            tokens=tokens,
+            layer_idx=layer_idx,
+            **kwargs
+        )

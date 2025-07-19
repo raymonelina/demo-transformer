@@ -77,7 +77,7 @@ class RelativeMultiHeadAttention(nn.Module):
     Multi-Head Attention with relative positional encoding.
     """
     
-    def __init__(self, embed_dim: int, num_heads: int, max_seq_len: int = 512, debug_mode: bool = False):
+    def __init__(self, embed_dim: int, num_heads: int, max_seq_len: int = 512, debug_mode: bool = False, store_attention: bool = False):
         """
         Initialize relative multi-head attention.
         
@@ -110,8 +110,10 @@ class RelativeMultiHeadAttention(nn.Module):
         # Additional projection for relative positions
         self.pos_key_proj = nn.Linear(self.head_dim, self.head_dim, bias=False)
         
-        # Debug mode
+        # Debug mode and attention storage
         self.debug_mode = debug_mode
+        self.store_attention = store_attention
+        self.last_attention_weights = None
         
     def _rel_shift(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -231,6 +233,10 @@ class RelativeMultiHeadAttention(nn.Module):
         attention_probs = F.softmax(attention_scores, dim=-1)
         if self.debug_mode:
             debug_print(attention_probs, "attention_probs", "Attention probabilities after softmax", "RelativeAttention: ")
+        
+        # Store attention weights if requested
+        if self.store_attention:
+            self.last_attention_weights = attention_probs.detach()
         
         # Apply attention to values
         context = torch.matmul(attention_probs, V)

@@ -18,6 +18,7 @@ A comprehensive implementation of the Transformer Encoder-Decoder architecture f
 - Relative positional encoding for better handling of variable-length sequences
 - Gradient checkpointing for memory-efficient training of large models
 - Debug mode for printing tensor shapes and values during execution
+- Visualization tools for attention weights and embeddings
 
 ## Installation
 
@@ -60,6 +61,7 @@ config = TransformerConfig(
     use_relative_pos=False,  # Whether to use relative positional encoding
     use_gradient_checkpointing=False,  # Whether to use gradient checkpointing
     debug_mode=False,  # Whether to print debug information about tensors
+    store_attention=False,  # Whether to store attention weights for visualization
 )
 
 # Initialize the model
@@ -133,6 +135,55 @@ Run the debug printing example:
 
 ```bash
 python examples/debug_printing_example.py
+```
+
+### Visualization
+
+You can visualize attention weights and embeddings to better understand the model:
+
+```python
+config = TransformerConfig(
+    # ... other parameters ...
+    store_attention=True,  # Enable attention weight storage for visualization
+)
+
+model = Transformer(config)
+
+# Run a forward pass to generate attention weights
+output = model(src_ids, tgt_ids, src_padding_mask)
+
+# Visualize encoder self-attention
+fig = model.visualize_encoder_attention(
+    layer_idx=0,  # First encoder layer
+    head_idx=None,  # Average across all heads
+    tokens=src_tokens  # Optional token labels
+)
+
+# Visualize decoder cross-attention
+fig = model.visualize_decoder_cross_attention(
+    layer_idx=0,  # First decoder layer
+    head_idx=2,  # Third attention head
+    src_tokens=src_tokens,  # Source token labels
+    tgt_tokens=tgt_tokens  # Target token labels
+)
+
+# Visualize token embeddings using PCA
+fig = model.visualize_encoder_embeddings(
+    input_ids=src_ids,
+    tokens=src_tokens
+)
+
+# Visualize all attention heads in a grid
+fig = model.visualize_attention_heads(
+    attention_type="encoder",  # "encoder", "decoder_self", or "decoder_cross"
+    layer_idx=0
+)
+```
+
+Run the visualization example:
+
+```bash
+python examples/visualization_example.py
 ```
 
 ## Components

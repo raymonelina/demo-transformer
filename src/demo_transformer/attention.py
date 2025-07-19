@@ -14,7 +14,7 @@ class MultiHeadAttention(nn.Module):
     Can be used for self-attention (query=key=value) or cross-attention.
     """
 
-    def __init__(self, embed_dim: int, num_heads: int, debug_mode: bool = False):
+    def __init__(self, embed_dim: int, num_heads: int, debug_mode: bool = False, store_attention: bool = False):
         super().__init__()
         if embed_dim % num_heads != 0:
             raise ValueError(
@@ -25,6 +25,8 @@ class MultiHeadAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
         self.debug_mode = debug_mode
+        self.store_attention = store_attention
+        self.last_attention_weights = None
 
         self.query_proj = nn.Linear(embed_dim, embed_dim)
         self.key_proj = nn.Linear(embed_dim, embed_dim)
@@ -82,6 +84,10 @@ class MultiHeadAttention(nn.Module):
         attention_probs = torch.softmax(attention_scores, dim=-1)
         if self.debug_mode:
             debug_print(attention_probs, "attention_probs", "Attention probabilities after softmax", "Attention: ")
+            
+        # Store attention weights if requested
+        if self.store_attention:
+            self.last_attention_weights = attention_probs.detach()
 
         context = torch.matmul(attention_probs, V)
         if self.debug_mode:
