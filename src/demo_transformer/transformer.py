@@ -42,6 +42,7 @@ class Transformer(nn.Module):
             max_seq_len=config.max_seq_len,
             dropout_rate=config.dropout_rate,
             pre_norm=config.pre_norm,
+            use_relative_pos=config.use_relative_pos,
         )
         
         self.decoder = TransformerDecoder(
@@ -53,6 +54,7 @@ class Transformer(nn.Module):
             max_seq_len=config.max_seq_len,
             dropout_rate=config.dropout_rate,
             pre_norm=config.pre_norm,
+            use_relative_pos=config.use_relative_pos,
         )
         
         # Implement weight tying if configured

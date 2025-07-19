@@ -5,6 +5,7 @@ import torch.nn as nn
 from typing import Optional
 
 from .attention import MultiHeadAttention
+from .relative_positional_encoding import RelativeMultiHeadAttention
 from .feed_forward import FeedForwardBlock
 from .positional_encoding import PositionalEncoding
 
@@ -16,7 +17,7 @@ class EncoderLayer(nn.Module):
 
     def __init__(
         self, embed_dim: int, num_heads: int, ff_dim: int, dropout_rate: float = 0.1,
-        pre_norm: bool = True
+        pre_norm: bool = True, use_relative_pos: bool = False, max_seq_len: int = 512
     ):
         """
         Initialize an encoder layer.
@@ -29,7 +30,10 @@ class EncoderLayer(nn.Module):
             pre_norm: Whether to use pre-layer normalization (True) or post-layer normalization (False)
         """
         super().__init__()
-        self.self_attn = MultiHeadAttention(embed_dim, num_heads)
+        if use_relative_pos:
+            self.self_attn = RelativeMultiHeadAttention(embed_dim, num_heads, max_seq_len)
+        else:
+            self.self_attn = MultiHeadAttention(embed_dim, num_heads)
         self.norm1 = nn.LayerNorm(embed_dim)
         self.dropout1 = nn.Dropout(dropout_rate)
 
@@ -85,6 +89,7 @@ class TransformerEncoder(nn.Module):
         max_seq_len: int,
         dropout_rate: float = 0.1,
         pre_norm: bool = True,
+        use_relative_pos: bool = False,
     ):
         """
         Initialize a transformer encoder.
@@ -105,7 +110,7 @@ class TransformerEncoder(nn.Module):
         self.positional_encoding = PositionalEncoding(embed_dim, max_seq_len)
         self.encoder_layers = nn.ModuleList(
             [
-                EncoderLayer(embed_dim, num_heads, ff_dim, dropout_rate, pre_norm)
+                EncoderLayer(embed_dim, num_heads, ff_dim, dropout_rate, pre_norm, use_relative_pos, max_seq_len)
                 for _ in range(num_layers)
             ]
         )

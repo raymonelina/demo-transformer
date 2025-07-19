@@ -32,6 +32,7 @@ class TransformerConfig:
     label_smoothing: float = 0.1
     weight_tying: bool = True
     pre_norm: bool = True  # Pre-layer normalization
+    use_relative_pos: bool = False  # Whether to use relative positional encoding
     
     def __post_init__(self):
         """Validate and set default values after initialization."""
