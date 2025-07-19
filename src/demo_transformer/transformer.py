@@ -7,6 +7,7 @@ from typing import Optional, Dict, Any, Union
 from .encoder import TransformerEncoder
 from .decoder import TransformerDecoder
 from .config import TransformerConfig
+from .debug_utils import debug_print
 
 
 class Transformer(nn.Module):
@@ -44,6 +45,7 @@ class Transformer(nn.Module):
             pre_norm=config.pre_norm,
             use_relative_pos=config.use_relative_pos,
             use_gradient_checkpointing=config.use_gradient_checkpointing,
+            debug_mode=config.debug_mode,
         )
         
         self.decoder = TransformerDecoder(
@@ -57,6 +59,7 @@ class Transformer(nn.Module):
             pre_norm=config.pre_norm,
             use_relative_pos=config.use_relative_pos,
             use_gradient_checkpointing=config.use_gradient_checkpointing,
+            debug_mode=config.debug_mode,
         )
         
         # Implement weight tying if configured
@@ -82,8 +85,24 @@ class Transformer(nn.Module):
         Returns:
             Decoder logits [batch_size, tgt_seq_len, tgt_vocab_size]
         """
+        if hasattr(self.config, 'debug_mode') and self.config.debug_mode:
+            debug_print(src_ids, "src_ids", "Source token IDs", "Transformer: ")
+            debug_print(tgt_ids, "tgt_ids", "Target token IDs", "Transformer: ")
+            if src_padding_mask is not None:
+                debug_print(src_padding_mask, "src_padding_mask", "Source padding mask", "Transformer: ")
+            if tgt_padding_mask is not None:
+                debug_print(tgt_padding_mask, "tgt_padding_mask", "Target padding mask", "Transformer: ")
+                
         encoder_output = self.encoder(src_ids, src_padding_mask)
+        
+        if hasattr(self.config, 'debug_mode') and self.config.debug_mode:
+            debug_print(encoder_output, "encoder_output", "Encoder output tensor", "Transformer: ")
+            
         decoder_logits = self.decoder(tgt_ids, encoder_output, src_padding_mask)
+        
+        if hasattr(self.config, 'debug_mode') and self.config.debug_mode:
+            debug_print(decoder_logits, "decoder_logits", "Decoder output logits", "Transformer: ")
+            
         return decoder_logits
     
     def encode(self, src_ids: torch.Tensor, src_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:

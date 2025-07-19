@@ -13,6 +13,7 @@ from .config import TransformerConfig
 from .training import TransformerTrainer, LabelSmoothingLoss, get_transformer_scheduler
 from .inference_utils import TransformerInference
 from .data import TransformerDataset, TransformerCollator, create_dataloaders
+from .debug_utils import debug_print
 
 __version__ = "0.2.0"
 
@@ -33,4 +34,5 @@ __all__ = [
     "TransformerDataset",
     "TransformerCollator",
     "create_dataloaders",
+    "debug_print",
 ]

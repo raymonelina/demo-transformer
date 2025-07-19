@@ -8,6 +8,8 @@ import torch.nn.functional as F
 import math
 from typing import Optional
 
+from .debug_utils import debug_print
+
 
 class RelativePositionalEncoding(nn.Module):
     """
@@ -75,7 +77,7 @@ class RelativeMultiHeadAttention(nn.Module):
     Multi-Head Attention with relative positional encoding.
     """
     
-    def __init__(self, embed_dim: int, num_heads: int, max_seq_len: int = 512):
+    def __init__(self, embed_dim: int, num_heads: int, max_seq_len: int = 512, debug_mode: bool = False):
         """
         Initialize relative multi-head attention.
         
@@ -107,6 +109,9 @@ class RelativeMultiHeadAttention(nn.Module):
         
         # Additional projection for relative positions
         self.pos_key_proj = nn.Linear(self.head_dim, self.head_dim, bias=False)
+        
+        # Debug mode
+        self.debug_mode = debug_mode
         
     def _rel_shift(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -154,6 +159,13 @@ class RelativeMultiHeadAttention(nn.Module):
         Returns:
             Output tensor [batch_size, seq_len_q, embed_dim]
         """
+        if self.debug_mode:
+            debug_print(query, "rel_query_input", "Query input tensor", "RelativeAttention: ")
+            debug_print(key, "rel_key_input", "Key input tensor", "RelativeAttention: ")
+            debug_print(value, "rel_value_input", "Value input tensor", "RelativeAttention: ")
+            if mask is not None:
+                debug_print(mask, "rel_attention_mask", "Attention mask tensor", "RelativeAttention: ")
+        
         batch_size, seq_len_q, _ = query.size()
         _, seq_len_k, _ = key.size()
         
@@ -162,45 +174,77 @@ class RelativeMultiHeadAttention(nn.Module):
         K = self.key_proj(key)
         V = self.value_proj(value)
         
+        if self.debug_mode:
+            debug_print(Q, "rel_Q_projected", "Query after projection", "RelativeAttention: ")
+            debug_print(K, "rel_K_projected", "Key after projection", "RelativeAttention: ")
+            debug_print(V, "rel_V_projected", "Value after projection", "RelativeAttention: ")
+        
         # Reshape to [batch_size, num_heads, seq_len, head_dim]
         Q = Q.view(batch_size, seq_len_q, self.num_heads, self.head_dim).transpose(1, 2)
         K = K.view(batch_size, seq_len_k, self.num_heads, self.head_dim).transpose(1, 2)
         V = V.view(batch_size, seq_len_k, self.num_heads, self.head_dim).transpose(1, 2)
         
+        if self.debug_mode:
+            debug_print(Q, "rel_Q_reshaped", "Query after reshaping for multi-head", "RelativeAttention: ")
+            debug_print(K, "rel_K_reshaped", "Key after reshaping for multi-head", "RelativeAttention: ")
+            debug_print(V, "rel_V_reshaped", "Value after reshaping for multi-head", "RelativeAttention: ")
+        
         # Get relative position embeddings [2*seq_len_k-1, head_dim]
         rel_pos_emb = self.rel_pos_encoding(seq_len_k)
+        if self.debug_mode:
+            debug_print(rel_pos_emb, "rel_pos_emb", "Relative position embeddings", "RelativeAttention: ")
         
         # Project relative position embeddings
         rel_pos_key = self.pos_key_proj(rel_pos_emb)
+        if self.debug_mode:
+            debug_print(rel_pos_key, "rel_pos_key", "Projected relative position keys", "RelativeAttention: ")
         
         # Content-content attention
         content_scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim)
+        if self.debug_mode:
+            debug_print(content_scores, "content_scores", "Content-content attention scores", "RelativeAttention: ")
         
         # Content-position attention
         # [batch_size, num_heads, seq_len_q, 2*seq_len_k-1]
         rel_pos_key = rel_pos_key.unsqueeze(0).unsqueeze(0)
         position_scores = torch.matmul(Q, rel_pos_key.transpose(-2, -1)) / math.sqrt(self.head_dim)
+        if self.debug_mode:
+            debug_print(position_scores, "position_scores", "Content-position attention scores", "RelativeAttention: ")
         
         # Shift and slice position scores to align them
         rel_position_scores = self._rel_shift(position_scores)
+        if self.debug_mode:
+            debug_print(rel_position_scores, "rel_position_scores", "Shifted position scores", "RelativeAttention: ")
         
         # Combine content and position scores
         attention_scores = content_scores + rel_position_scores
+        if self.debug_mode:
+            debug_print(attention_scores, "combined_attention_scores", "Combined attention scores", "RelativeAttention: ")
         
         # Apply mask if provided
         if mask is not None:
             attention_scores = attention_scores.masked_fill(mask, float("-inf"))
+            if self.debug_mode:
+                debug_print(attention_scores, "masked_attention_scores", "Attention scores after masking", "RelativeAttention: ")
         
         # Apply softmax
         attention_probs = F.softmax(attention_scores, dim=-1)
+        if self.debug_mode:
+            debug_print(attention_probs, "attention_probs", "Attention probabilities after softmax", "RelativeAttention: ")
         
         # Apply attention to values
         context = torch.matmul(attention_probs, V)
+        if self.debug_mode:
+            debug_print(context, "context", "Context vectors after attention", "RelativeAttention: ")
         
         # Reshape back
         context = context.transpose(1, 2).contiguous().view(batch_size, seq_len_q, self.embed_dim)
+        if self.debug_mode:
+            debug_print(context, "context_reshaped", "Context after reshaping back", "RelativeAttention: ")
         
         # Final projection
         output = self.out_proj(context)
+        if self.debug_mode:
+            debug_print(output, "rel_attention_output", "Final relative attention output", "RelativeAttention: ")
         
         return output

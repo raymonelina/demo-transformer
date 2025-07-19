@@ -34,6 +34,7 @@ class TransformerConfig:
     pre_norm: bool = True  # Pre-layer normalization
     use_relative_pos: bool = False  # Whether to use relative positional encoding
     use_gradient_checkpointing: bool = False  # Whether to use gradient checkpointing to save memory
+    debug_mode: bool = False  # Whether to print debug information about tensor shapes and values
     
     def __post_init__(self):
         """Validate and set default values after initialization."""

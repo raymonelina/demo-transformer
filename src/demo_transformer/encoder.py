@@ -5,6 +5,8 @@ import torch.nn as nn
 import torch.utils.checkpoint
 from typing import Optional, Tuple
 
+from .debug_utils import debug_print
+
 from .attention import MultiHeadAttention
 from .relative_positional_encoding import RelativeMultiHeadAttention
 from .feed_forward import FeedForwardBlock
@@ -18,7 +20,8 @@ class EncoderLayer(nn.Module):
 
     def __init__(
         self, embed_dim: int, num_heads: int, ff_dim: int, dropout_rate: float = 0.1,
-        pre_norm: bool = True, use_relative_pos: bool = False, max_seq_len: int = 512
+        pre_norm: bool = True, use_relative_pos: bool = False, max_seq_len: int = 512,
+        debug_mode: bool = False
     ):
         """
         Initialize an encoder layer.
@@ -31,10 +34,11 @@ class EncoderLayer(nn.Module):
             pre_norm: Whether to use pre-layer normalization (True) or post-layer normalization (False)
         """
         super().__init__()
+        self.debug_mode = debug_mode
         if use_relative_pos:
-            self.self_attn = RelativeMultiHeadAttention(embed_dim, num_heads, max_seq_len)
+            self.self_attn = RelativeMultiHeadAttention(embed_dim, num_heads, max_seq_len, debug_mode=debug_mode)
         else:
-            self.self_attn = MultiHeadAttention(embed_dim, num_heads)
+            self.self_attn = MultiHeadAttention(embed_dim, num_heads, debug_mode=debug_mode)
         self.norm1 = nn.LayerNorm(embed_dim)
         self.dropout1 = nn.Dropout(dropout_rate)
 
@@ -45,6 +49,8 @@ class EncoderLayer(nn.Module):
         self.pre_norm = pre_norm
 
     def forward(self, x: torch.Tensor, src_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        if self.debug_mode:
+            debug_print(x, "layer_input", "Input to encoder layer", "EncoderLayer: ")
         """
         Forward pass of the encoder layer.
         
@@ -92,6 +98,7 @@ class TransformerEncoder(nn.Module):
         pre_norm: bool = True,
         use_relative_pos: bool = False,
         use_gradient_checkpointing: bool = False,
+        debug_mode: bool = False,
     ):
         """
         Initialize a transformer encoder.
@@ -112,7 +119,7 @@ class TransformerEncoder(nn.Module):
         self.positional_encoding = PositionalEncoding(embed_dim, max_seq_len)
         self.encoder_layers = nn.ModuleList(
             [
-                EncoderLayer(embed_dim, num_heads, ff_dim, dropout_rate, pre_norm, use_relative_pos, max_seq_len)
+                EncoderLayer(embed_dim, num_heads, ff_dim, dropout_rate, pre_norm, use_relative_pos, max_seq_len, debug_mode)
                 for _ in range(num_layers)
             ]
         )
@@ -123,6 +130,9 @@ class TransformerEncoder(nn.Module):
         
         # Gradient checkpointing to save memory
         self.use_gradient_checkpointing = use_gradient_checkpointing
+        
+        # Debug mode
+        self.debug_mode = debug_mode
 
     def _layer_forward(self, layer: nn.Module, x: torch.Tensor, src_padding_mask: Optional[torch.Tensor]) -> torch.Tensor:
         """Helper function for gradient checkpointing."""
@@ -139,20 +149,42 @@ class TransformerEncoder(nn.Module):
         Returns:
             Encoder output [batch_size, seq_len, embed_dim]
         """
+        if self.debug_mode:
+            debug_print(input_ids, "input_ids", "Input token IDs", "Encoder: ")
+            if src_padding_mask is not None:
+                debug_print(src_padding_mask, "src_padding_mask", "Source padding mask", "Encoder: ")
+                
         embeddings = self.token_embedding(input_ids)
+        if self.debug_mode:
+            debug_print(embeddings, "token_embeddings", "Token embeddings before positional encoding", "Encoder: ")
+            
         embeddings = self.positional_encoding(embeddings)
+        if self.debug_mode:
+            debug_print(embeddings, "pos_embeddings", "Embeddings after positional encoding", "Encoder: ")
+            
         x = self.dropout(embeddings)
 
         for i, layer in enumerate(self.encoder_layers):
+            if self.debug_mode:
+                debug_print(x, f"encoder_layer_{i}_input", f"Input to encoder layer {i}", "Encoder: ")
+                
             if self.use_gradient_checkpointing and self.training:
                 x = torch.utils.checkpoint.checkpoint(
                     self._layer_forward, layer, x, src_padding_mask
                 )
             else:
                 x = layer(x, src_padding_mask)
+                
+            if self.debug_mode:
+                debug_print(x, f"encoder_layer_{i}_output", f"Output from encoder layer {i}", "Encoder: ")
             
         # Apply final normalization if using pre-norm
         if self.final_norm is not None:
             x = self.final_norm(x)
+            if self.debug_mode:
+                debug_print(x, "encoder_final_norm", "Output after final layer normalization", "Encoder: ")
 
+        if self.debug_mode:
+            debug_print(x, "encoder_output", "Final encoder output", "Encoder: ")
+            
         return x

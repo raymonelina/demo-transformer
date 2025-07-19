@@ -17,6 +17,7 @@ A comprehensive implementation of the Transformer Encoder-Decoder architecture f
 - Weight tying option for parameter efficiency
 - Relative positional encoding for better handling of variable-length sequences
 - Gradient checkpointing for memory-efficient training of large models
+- Debug mode for printing tensor shapes and values during execution
 
 ## Installation
 
@@ -58,6 +59,7 @@ config = TransformerConfig(
     tgt_vocab_size=32000,
     use_relative_pos=False,  # Whether to use relative positional encoding
     use_gradient_checkpointing=False,  # Whether to use gradient checkpointing
+    debug_mode=False,  # Whether to print debug information about tensors
 )
 
 # Initialize the model
@@ -114,6 +116,23 @@ You can run the example script to see a complete demonstration:
 
 ```bash
 python examples/basic_usage.py
+```
+
+### Debug Mode
+
+You can enable debug mode to print tensor shapes and values during execution:
+
+```python
+config = TransformerConfig(
+    # ... other parameters ...
+    debug_mode=True,  # Enable debug printing
+)
+```
+
+Run the debug printing example:
+
+```bash
+python examples/debug_printing_example.py
 ```
 
 ## Components
