@@ -154,7 +154,26 @@ class MultiHeadAttention(nn.Module):
 class RelativeMultiHeadAttention(nn.Module):
     """
     Multi-Head Attention with relative positional encoding.
-
+    
+    This implementation is based on the paper "Self-Attention with Relative Position Representations" 
+    (Shaw et al., 2018, https://arxiv.org/abs/1803.02155). The key innovation is incorporating 
+    explicit relative position information directly into the self-attention mechanism, rather than 
+    adding absolute position encodings to input embeddings.
+    
+    Key advantages over standard positional encoding:
+    1. Better generalization to sequence lengths not seen during training
+    2. More effective modeling of fine-grained relative position relationships
+    3. Improved performance on tasks requiring precise understanding of token relationships
+    
+    The approach works by:
+    - Computing standard content-content attention (query-key interactions)
+    - Adding content-position attention (query interaction with relative position keys)
+    - Using a specialized shifting mechanism to align relative positions correctly
+    
+    Mathematical formulation:
+    Attention(Q, K, V) = softmax(QK^T/√d + QR^T/√d)V
+    where R represents the relative position embeddings.
+    
     When store_attention=True, the attention weights (after softmax) are saved in
     last_attention_weights for later visualization or analysis. This is useful for:
     - Visualizing attention patterns to understand model behavior
@@ -177,7 +196,10 @@ class RelativeMultiHeadAttention(nn.Module):
         Args:
             embed_dim: Dimension of embeddings
             num_heads: Number of attention heads
-            max_seq_len: Maximum sequence length
+            max_seq_len: Maximum sequence length for relative positions. This defines the range of
+                relative positions that can be represented (-max_seq_len+1 to max_seq_len-1).
+                As per Shaw et al. (2018), this clipping of relative positions helps control
+                model complexity while still capturing important local context.
             debug_mode: Whether to print debug information about tensors
             store_attention: Whether to store attention weights for visualization
         """
@@ -199,10 +221,16 @@ class RelativeMultiHeadAttention(nn.Module):
         # Output projection
         self.out_proj = nn.Linear(embed_dim, embed_dim)
 
-        # Relative position encoding
+        # Relative position encoding - generates embeddings for relative positions
+        # This implements the core idea from Shaw et al. (2018) where relative positions from
+        # -(max_seq_len-1) to (max_seq_len-1) are encoded as learnable embeddings
+        # These embeddings capture the relative distance between tokens in the sequence
         self.rel_pos_encoding = RelativePositionalEncoding(self.head_dim, max_seq_len)
 
-        # Additional projection for relative positions
+        # Additional projection for relative positions - transforms position embeddings into key space
+        # This is analogous to the key projection in standard attention but specifically for positions
+        # The bias=False setting follows the original implementation and helps prevent overfitting
+        # This projection is critical for the model to learn how to effectively use position information
         self.pos_key_proj = nn.Linear(self.head_dim, self.head_dim, bias=False)
 
         # Debug mode and attention storage
