@@ -12,9 +12,33 @@ class MultiHeadAttention(nn.Module):
     """
     Multi-Head Attention mechanism.
     Can be used for self-attention (query=key=value) or cross-attention.
+    
+    Supports masking through the mask parameter, which can be:
+    - A causal/autoregressive mask (created in the decoder)
+    - A padding mask (created in both encoder and decoder)
+    - A combined mask (e.g., both causal and padding in decoder self-attention)
+    
+    The mask should be a boolean tensor where True values are positions to be masked out
+    (set to -inf before softmax). The attention module applies the mask as provided
+    without distinguishing its type - the mask creation happens externally.
+    
+    When store_attention=True, the attention weights (after softmax) are saved in
+    last_attention_weights for later visualization or analysis. This is useful for:
+    - Visualizing attention patterns to understand model behavior
+    - Interpreting which input tokens the model focuses on
+    - Debugging attention mechanisms
+    - Creating attention heatmaps for explainability
     """
 
     def __init__(self, embed_dim: int, num_heads: int, debug_mode: bool = False, store_attention: bool = False):
+        """Initialize the multi-head attention module.
+        
+        Args:
+            embed_dim: Dimension of the embeddings
+            num_heads: Number of attention heads
+            debug_mode: Whether to print debug information about tensors
+            store_attention: Whether to store attention weights for visualization
+        """
         super().__init__()
         if embed_dim % num_heads != 0:
             raise ValueError(
@@ -86,8 +110,10 @@ class MultiHeadAttention(nn.Module):
             debug_print(attention_probs, "attention_probs", "Attention probabilities after softmax", "Attention: ")
             
         # Store attention weights if requested
+        # This allows for later visualization of attention patterns and model interpretability
+        # The detach() call prevents these stored weights from participating in backpropagation
         if self.store_attention:
-            self.last_attention_weights = attention_probs.detach()
+            self.last_attention_weights = attention_probs.detach()  # Store a copy without gradient tracking
 
         context = torch.matmul(attention_probs, V)
         if self.debug_mode:
