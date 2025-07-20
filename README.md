@@ -51,18 +51,18 @@ This project uses [`pytest`](https://docs.pytest.org/) for testing. To run tests
 ```bash
 # Recommended: via uv
 uv run pytest
-```
-
-Other options:
-
-```bash
+# or
 # Run tests as a Python module
 python -m pytest
+```
 
+More options:
+
+```bash
 # Run with verbose output
 python -m pytest -v
 
-# Show test print/log output
+# Show test print/log output (including debug prints)
 python -m pytest -s
 
 # Run a specific test file

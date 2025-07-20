@@ -36,7 +36,11 @@ def debug_print(
                 elif print_values:
                     flat = t.detach().cpu().flatten()
                     print(f"{prefix}    First {max_elements} values: {flat[:max_elements].tolist()}")
-                    print(f"{prefix}    Min: {t.min().item()}, Max: {t.max().item()}, Mean: {t.mean().item()}")
+                    # Handle boolean tensors which don't support mean()
+                    if t.dtype == torch.bool:
+                        print(f"{prefix}    Min: {t.min().item()}, Max: {t.max().item()}, True count: {t.sum().item()}")
+                    else:
+                        print(f"{prefix}    Min: {t.min().item()}, Max: {t.max().item()}, Mean: {t.mean().item()}")
     elif isinstance(tensor, torch.Tensor):
         shape_str = f"shape={tuple(tensor.shape)}"
         dtype_str = f"dtype={tensor.dtype}"
@@ -48,6 +52,10 @@ def debug_print(
         elif print_values:
             flat = tensor.detach().cpu().flatten()
             print(f"{prefix}  First {max_elements} values: {flat[:max_elements].tolist()}")
-            print(f"{prefix}  Min: {tensor.min().item()}, Max: {tensor.max().item()}, Mean: {tensor.mean().item()}")
+            # Handle boolean tensors which don't support mean()
+            if tensor.dtype == torch.bool:
+                print(f"{prefix}  Min: {tensor.min().item()}, Max: {tensor.max().item()}, True count: {tensor.sum().item()}")
+            else:
+                print(f"{prefix}  Min: {tensor.min().item()}, Max: {tensor.max().item()}, Mean: {tensor.mean().item()}")
     else:
         print(f"{prefix}[DEBUG] {name} (Not a tensor): {tensor}")
