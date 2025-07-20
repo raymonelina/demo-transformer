@@ -8,8 +8,10 @@ from typing import Optional, Tuple
 from .debug_utils import debug_print
 
 from .attention import MultiHeadAttention, RelativeMultiHeadAttention
+from .rope_attention import RoPEMultiHeadAttention
 from .feed_forward import FeedForwardBlock
 from .positional_encoding import PositionalEncoding
+from .rotary_positional_encoding import RotaryPositionalEncoding
 
 
 class DecoderLayer(nn.Module):
@@ -25,6 +27,7 @@ class DecoderLayer(nn.Module):
         dropout_rate: float = 0.1,
         pre_norm: bool = True,
         use_relative_pos: bool = False,
+        use_rope: bool = False,
         max_seq_len: int = 512,
         debug_mode: bool = False,
         store_attention: bool = False,
@@ -42,6 +45,8 @@ class DecoderLayer(nn.Module):
         super().__init__()
         self.debug_mode = debug_mode
         self.store_attention = store_attention
+        
+        # Choose the appropriate attention mechanism based on parameters
         if use_relative_pos:
             self.self_attn = RelativeMultiHeadAttention(
                 embed_dim,
@@ -51,6 +56,21 @@ class DecoderLayer(nn.Module):
                 store_attention=store_attention,
             )
             self.cross_attn = RelativeMultiHeadAttention(
+                embed_dim,
+                num_heads,
+                max_seq_len,
+                debug_mode=debug_mode,
+                store_attention=store_attention,
+            )
+        elif use_rope:
+            self.self_attn = RoPEMultiHeadAttention(
+                embed_dim,
+                num_heads,
+                max_seq_len,
+                debug_mode=debug_mode,
+                store_attention=store_attention,
+            )
+            self.cross_attn = RoPEMultiHeadAttention(
                 embed_dim,
                 num_heads,
                 max_seq_len,
@@ -154,6 +174,7 @@ class TransformerDecoder(nn.Module):
         dropout_rate: float = 0.1,
         pre_norm: bool = True,
         use_relative_pos: bool = False,
+        use_rope: bool = False,
         use_gradient_checkpointing: bool = False,
         debug_mode: bool = False,
         store_attention: bool = False,
@@ -176,7 +197,15 @@ class TransformerDecoder(nn.Module):
         self.vocab_size = vocab_size
 
         self.token_embedding = nn.Embedding(vocab_size, embed_dim)
-        self.positional_encoding = PositionalEncoding(embed_dim, max_seq_len)
+        
+        # Choose the appropriate positional encoding based on parameters
+        if use_rope:
+            # For RoPE, we still create a positional encoding object for API compatibility,
+            # but the actual rotation is applied in the attention mechanism
+            self.positional_encoding = RotaryPositionalEncoding(embed_dim, max_seq_len)
+        else:
+            self.positional_encoding = PositionalEncoding(embed_dim, max_seq_len)
+            
         self.decoder_layers = nn.ModuleList(
             [
                 DecoderLayer(
@@ -186,6 +215,7 @@ class TransformerDecoder(nn.Module):
                     dropout_rate,
                     pre_norm,
                     use_relative_pos,
+                    use_rope,
                     max_seq_len,
                     debug_mode,
                     store_attention,

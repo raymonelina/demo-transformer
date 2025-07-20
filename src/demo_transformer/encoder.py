@@ -10,6 +10,9 @@ from .debug_utils import debug_print
 from .attention import MultiHeadAttention
 from .feed_forward import FeedForwardBlock
 from .positional_encoding import PositionalEncoding
+from .relative_positional_encoding import RelativePositionalEncoding
+from .rotary_positional_encoding import RotaryPositionalEncoding
+from .rope_attention import RoPEMultiHeadAttention
 
 
 class EncoderLayer(nn.Module):
@@ -25,6 +28,7 @@ class EncoderLayer(nn.Module):
         dropout_rate: float = 0.1,
         pre_norm: bool = True,
         use_relative_pos: bool = False,
+        use_rope: bool = False,
         max_seq_len: int = 512,
         debug_mode: bool = False,
         store_attention: bool = False,
@@ -42,8 +46,18 @@ class EncoderLayer(nn.Module):
         super().__init__()
         self.debug_mode = debug_mode
         self.store_attention = store_attention
+        
+        # Choose the appropriate attention mechanism based on parameters
         if use_relative_pos:
             self.self_attn = RelativeMultiHeadAttention(
+                embed_dim,
+                num_heads,
+                max_seq_len,
+                debug_mode=debug_mode,
+                store_attention=store_attention,
+            )
+        elif use_rope:
+            self.self_attn = RoPEMultiHeadAttention(
                 embed_dim,
                 num_heads,
                 max_seq_len,
@@ -112,6 +126,7 @@ class TransformerEncoder(nn.Module):
         dropout_rate: float = 0.1,
         pre_norm: bool = True,
         use_relative_pos: bool = False,
+        use_rope: bool = False,
         use_gradient_checkpointing: bool = False,
         debug_mode: bool = False,
         store_attention: bool = False,
@@ -132,7 +147,15 @@ class TransformerEncoder(nn.Module):
         super().__init__()
         self.embed_dim = embed_dim
         self.token_embedding = nn.Embedding(vocab_size, embed_dim)
-        self.positional_encoding = PositionalEncoding(embed_dim, max_seq_len)
+        
+        # Choose the appropriate positional encoding based on parameters
+        if use_rope:
+            # For RoPE, we still create a positional encoding object for API compatibility,
+            # but the actual rotation is applied in the attention mechanism
+            self.positional_encoding = RotaryPositionalEncoding(embed_dim, max_seq_len)
+        else:
+            self.positional_encoding = PositionalEncoding(embed_dim, max_seq_len)
+            
         self.encoder_layers = nn.ModuleList(
             [
                 EncoderLayer(
@@ -142,6 +165,7 @@ class TransformerEncoder(nn.Module):
                     dropout_rate,
                     pre_norm,
                     use_relative_pos,
+                    use_rope,
                     max_seq_len,
                     debug_mode,
                     store_attention,

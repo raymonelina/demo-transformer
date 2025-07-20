@@ -6,9 +6,11 @@ from .transformer import Transformer
 from .encoder import TransformerEncoder
 from .decoder import TransformerDecoder
 from .attention import MultiHeadAttention, RelativeMultiHeadAttention
+from .rope_attention import RoPEMultiHeadAttention
 from .feed_forward import FeedForwardBlock
 from .positional_encoding import PositionalEncoding
 from .relative_positional_encoding import RelativePositionalEncoding
+from .rotary_positional_encoding import RotaryPositionalEncoding
 from .config import TransformerConfig
 from .training import TransformerTrainer, LabelSmoothingLoss, get_transformer_scheduler
 from .data import TransformerDataset, TransformerCollator, create_dataloaders
@@ -23,9 +25,11 @@ __all__ = [
     "TransformerDecoder",
     "MultiHeadAttention",
     "RelativeMultiHeadAttention",
+    "RoPEMultiHeadAttention",
     "FeedForwardBlock",
     "PositionalEncoding",
     "RelativePositionalEncoding",
+    "RotaryPositionalEncoding",
     "TransformerConfig",
     "TransformerTrainer",
     "LabelSmoothingLoss",

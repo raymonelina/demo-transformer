@@ -33,6 +33,7 @@ class TransformerConfig:
     weight_tying: bool = True
     pre_norm: bool = True  # Pre-layer normalization
     use_relative_pos: bool = False  # Whether to use relative positional encoding
+    use_rope: bool = False  # Whether to use rotary positional encoding (RoPE)
     use_gradient_checkpointing: bool = False  # Whether to use gradient checkpointing to save memory
     debug_mode: bool = False  # Whether to print debug information about tensor shapes and values
     store_attention: bool = False  # Whether to store attention weights for visualization
