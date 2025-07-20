@@ -4,9 +4,8 @@ from demo_transformer.attention import MultiHeadAttention
 
 
 def test_multi_head_attention_forward():
-    print("\n\nRunning test_multi_head_attention_forward\n")
-
     """Test the forward pass of MultiHeadAttention with simple inputs."""
+    print("\n\nRunning test_multi_head_attention_forward\n")
     # Setup
     batch_size = 2
     seq_len = 4
@@ -31,9 +30,8 @@ def test_multi_head_attention_forward():
 
 
 def test_multi_head_attention_with_mask():
-    print("\n\nRunning test_multi_head_attention_with_mask\n")
-
     """Test the forward pass of MultiHeadAttention with a mask."""
+    print("\n\nRunning test_multi_head_attention_with_mask\n")
     # Setup
     batch_size = 2
     seq_len = 4

@@ -5,6 +5,7 @@ from demo_transformer.feed_forward import FeedForwardBlock
 
 def test_feed_forward_block_dimensions():
     """Test that the FeedForwardBlock preserves input/output dimensions."""
+    print("\n\nRunning test_feed_forward_block_dimensions\n")
     # Setup
     batch_size = 2
     seq_len = 4
@@ -28,6 +29,7 @@ def test_feed_forward_block_dimensions():
 
 def test_feed_forward_block_with_different_dimensions():
     """Test the FeedForwardBlock with different input dimensions."""
+    print("\n\nRunning test_feed_forward_block_with_different_dimensions\n")
     # Setup
     embed_dim = 16
     ff_dim = 64
