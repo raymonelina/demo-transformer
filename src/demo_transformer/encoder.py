@@ -8,11 +8,12 @@ from typing import Optional, Tuple
 from .debug_utils import debug_print
 
 from .attention import MultiHeadAttention
+from .relative_attention import RelativeMultiHeadAttention
+from .rope_attention import RoPEMultiHeadAttention
 from .feed_forward import FeedForwardBlock
 from .positional_encoding import PositionalEncoding
 from .relative_positional_encoding import RelativePositionalEncoding
 from .rotary_positional_encoding import RotaryPositionalEncoding
-from .rope_attention import RoPEMultiHeadAttention
 
 
 class EncoderLayer(nn.Module):

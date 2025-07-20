@@ -1,6 +1,7 @@
 import torch
 import pytest
-from demo_transformer.attention import MultiHeadAttention, RelativeMultiHeadAttention
+from demo_transformer.attention import MultiHeadAttention
+from demo_transformer.relative_attention import RelativeMultiHeadAttention
 
 
 def test_multi_head_attention_forward():
