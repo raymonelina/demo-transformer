@@ -8,6 +8,23 @@ import math
 class PositionalEncoding(nn.Module):
     """
     Applies sinusoidal positional encoding to input embeddings.
+    
+    This implementation is based on the paper "Attention Is All You Need" (Vaswani et al., 2017).
+    The positional encoding uses sine and cosine functions of different frequencies to encode
+    position information, allowing the model to learn to attend to tokens based on their
+    relative or absolute positions in the sequence.
+    
+    The encoding is defined as:
+    PE(pos, 2i) = sin(pos / 10000^(2i/d_model))
+    PE(pos, 2i+1) = cos(pos / 10000^(2i/d_model))
+    
+    where pos is the position and i is the dimension index.
+    
+    Key advantages of this approach:
+    - It allows the model to easily learn to attend by relative positions
+    - The sinusoidal functions provide a fixed pattern that generalizes to sequence lengths
+      not seen during training
+    - It doesn't require additional parameters to be learned
     """
 
     def __init__(self, embed_dim: int, max_seq_len: int = 5000):

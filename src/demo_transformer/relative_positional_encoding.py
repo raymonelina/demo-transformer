@@ -75,6 +75,13 @@ class RelativePositionalEncoding(nn.Module):
 class RelativeMultiHeadAttention(nn.Module):
     """
     Multi-Head Attention with relative positional encoding.
+    
+    When store_attention=True, the attention weights (after softmax) are saved in
+    last_attention_weights for later visualization or analysis. This is useful for:
+    - Visualizing attention patterns to understand model behavior
+    - Interpreting which input tokens the model focuses on
+    - Debugging attention mechanisms
+    - Creating attention heatmaps for explainability
     """
     
     def __init__(self, embed_dim: int, num_heads: int, max_seq_len: int = 512, debug_mode: bool = False, store_attention: bool = False):
@@ -85,6 +92,8 @@ class RelativeMultiHeadAttention(nn.Module):
             embed_dim: Dimension of embeddings
             num_heads: Number of attention heads
             max_seq_len: Maximum sequence length
+            debug_mode: Whether to print debug information about tensors
+            store_attention: Whether to store attention weights for visualization
         """
         super().__init__()
         if embed_dim % num_heads != 0:
@@ -235,8 +244,10 @@ class RelativeMultiHeadAttention(nn.Module):
             debug_print(attention_probs, "attention_probs", "Attention probabilities after softmax", "RelativeAttention: ")
         
         # Store attention weights if requested
+        # This allows for later visualization of attention patterns and model interpretability
+        # The detach() call prevents these stored weights from participating in backpropagation
         if self.store_attention:
-            self.last_attention_weights = attention_probs.detach()
+            self.last_attention_weights = attention_probs.detach()  # Store a copy without gradient tracking
         
         # Apply attention to values
         context = torch.matmul(attention_probs, V)
