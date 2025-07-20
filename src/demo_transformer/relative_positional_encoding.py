@@ -4,11 +4,7 @@ Relative positional encoding implementation for transformer models.
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import math
-from typing import Optional
-
-from .debug_utils import debug_print
 
 
 class RelativePositionalEncoding(nn.Module):
@@ -44,11 +40,15 @@ class RelativePositionalEncoding(nn.Module):
         div_term = torch.exp(
             torch.arange(0, self.embed_dim, 2).float() * (-math.log(10000.0) / self.embed_dim)
         )
-
-        # Apply sine to even indices
-        self.relative_positions_embeddings[:, 0::2] = torch.sin(positions * div_term)
-        # Apply cosine to odd indices
-        self.relative_positions_embeddings[:, 1::2] = torch.cos(positions * div_term)
+        
+        # Create a temporary buffer with sinusoidal pattern
+        embeddings = torch.zeros(2 * self.max_seq_len - 1, self.embed_dim)
+        embeddings[:, 0::2] = torch.sin(positions * div_term)
+        embeddings[:, 1::2] = torch.cos(positions * div_term)
+        
+        # Copy to parameter (non-in-place operation)
+        with torch.no_grad():
+            self.relative_positions_embeddings.copy_(embeddings)
 
     def forward(self, length: int) -> torch.Tensor:
         """

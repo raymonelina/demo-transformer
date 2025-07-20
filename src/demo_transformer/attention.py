@@ -2,8 +2,11 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import math
 from typing import Optional
+
+from .relative_positional_encoding import RelativePositionalEncoding
 
 from .debug_utils import debug_print
 
@@ -154,26 +157,26 @@ class MultiHeadAttention(nn.Module):
 class RelativeMultiHeadAttention(nn.Module):
     """
     Multi-Head Attention with relative positional encoding.
-    
-    This implementation is based on the paper "Self-Attention with Relative Position Representations" 
-    (Shaw et al., 2018, https://arxiv.org/abs/1803.02155). The key innovation is incorporating 
-    explicit relative position information directly into the self-attention mechanism, rather than 
+
+    This implementation is based on the paper "Self-Attention with Relative Position Representations"
+    (Shaw et al., 2018, https://arxiv.org/abs/1803.02155). The key innovation is incorporating
+    explicit relative position information directly into the self-attention mechanism, rather than
     adding absolute position encodings to input embeddings.
-    
+
     Key advantages over standard positional encoding:
     1. Better generalization to sequence lengths not seen during training
     2. More effective modeling of fine-grained relative position relationships
     3. Improved performance on tasks requiring precise understanding of token relationships
-    
+
     The approach works by:
     - Computing standard content-content attention (query-key interactions)
     - Adding content-position attention (query interaction with relative position keys)
     - Using a specialized shifting mechanism to align relative positions correctly
-    
+
     Mathematical formulation:
     Attention(Q, K, V) = softmax(QK^T/√d + QR^T/√d)V
     where R represents the relative position embeddings.
-    
+
     When store_attention=True, the attention weights (after softmax) are saved in
     last_attention_weights for later visualization or analysis. This is useful for:
     - Visualizing attention patterns to understand model behavior
@@ -249,17 +252,26 @@ class RelativeMultiHeadAttention(nn.Module):
             Shifted tensor [batch_size, num_heads, seq_len, seq_len]
         """
         batch_size, num_heads, seq_len, _ = x.size()
+        total_len = 2 * seq_len - 1
 
-        # Pad to shift from the right to left
-        zero_pad = torch.zeros((batch_size, num_heads, seq_len, 1), device=x.device, dtype=x.dtype)
-        x_padded = torch.cat([zero_pad, x], dim=-1)
-
-        # Reshape and slice
-        x_padded = x_padded.view(batch_size, num_heads, seq_len + 1, seq_len * 2 - 1)
-        x_shifted = x_padded[:, :, 1:].view_as(x)
-
-        # Take the appropriate parts
-        return x_shifted[:, :, :, :seq_len]
+        # Create a more robust implementation that doesn't rely on reshaping
+        # This avoids potential issues with tensor shapes
+        # We want to shift the scores so that scores corresponding to position 0 are at the center
+        
+        # First create the final output tensor directly
+        result = torch.zeros((batch_size, num_heads, seq_len, seq_len), device=x.device, dtype=x.dtype)
+        
+        # Fill it with the appropriate values from the original tensor
+        # The center of the original tensor (position seq_len-1) corresponds to relative position 0
+        center_pos = seq_len - 1
+        
+        for i in range(seq_len):
+            # For each position in the target sequence, copy the appropriate slice
+            # from the original tensor, shifted according to relative position
+            start_pos = center_pos - i
+            result[:, :, i, :] = x[:, :, i, start_pos:start_pos + seq_len]
+            
+        return result
 
     def forward(
         self,
