@@ -5,10 +5,10 @@ Transformer package for sequence-to-sequence tasks.
 from .transformer import Transformer
 from .encoder import TransformerEncoder
 from .decoder import TransformerDecoder
-from .attention import MultiHeadAttention
+from .attention import MultiHeadAttention, RelativeMultiHeadAttention
 from .feed_forward import FeedForwardBlock
 from .positional_encoding import PositionalEncoding
-from .relative_positional_encoding import RelativePositionalEncoding, RelativeMultiHeadAttention
+from .relative_positional_encoding import RelativePositionalEncoding
 from .config import TransformerConfig
 from .training import TransformerTrainer, LabelSmoothingLoss, get_transformer_scheduler
 from .data import TransformerDataset, TransformerCollator, create_dataloaders

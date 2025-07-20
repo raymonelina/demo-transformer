@@ -8,7 +8,6 @@ from typing import Optional, Tuple
 from .debug_utils import debug_print
 
 from .attention import MultiHeadAttention
-from .relative_positional_encoding import RelativeMultiHeadAttention
 from .feed_forward import FeedForwardBlock
 from .positional_encoding import PositionalEncoding
 
@@ -19,13 +18,20 @@ class EncoderLayer(nn.Module):
     """
 
     def __init__(
-        self, embed_dim: int, num_heads: int, ff_dim: int, dropout_rate: float = 0.1,
-        pre_norm: bool = True, use_relative_pos: bool = False, max_seq_len: int = 512,
-        debug_mode: bool = False, store_attention: bool = False
+        self,
+        embed_dim: int,
+        num_heads: int,
+        ff_dim: int,
+        dropout_rate: float = 0.1,
+        pre_norm: bool = True,
+        use_relative_pos: bool = False,
+        max_seq_len: int = 512,
+        debug_mode: bool = False,
+        store_attention: bool = False,
     ):
         """
         Initialize an encoder layer.
-        
+
         Args:
             embed_dim: Dimension of embeddings
             num_heads: Number of attention heads
@@ -37,18 +43,24 @@ class EncoderLayer(nn.Module):
         self.debug_mode = debug_mode
         self.store_attention = store_attention
         if use_relative_pos:
-            self.self_attn = RelativeMultiHeadAttention(embed_dim, num_heads, max_seq_len, 
-                                                      debug_mode=debug_mode, store_attention=store_attention)
+            self.self_attn = RelativeMultiHeadAttention(
+                embed_dim,
+                num_heads,
+                max_seq_len,
+                debug_mode=debug_mode,
+                store_attention=store_attention,
+            )
         else:
-            self.self_attn = MultiHeadAttention(embed_dim, num_heads, 
-                                              debug_mode=debug_mode, store_attention=store_attention)
+            self.self_attn = MultiHeadAttention(
+                embed_dim, num_heads, debug_mode=debug_mode, store_attention=store_attention
+            )
         self.norm1 = nn.LayerNorm(embed_dim)
         self.dropout1 = nn.Dropout(dropout_rate)
 
         self.feed_forward = FeedForwardBlock(embed_dim, ff_dim, dropout_rate)
         self.norm2 = nn.LayerNorm(embed_dim)
         self.dropout2 = nn.Dropout(dropout_rate)
-        
+
         self.pre_norm = pre_norm
 
     def forward(self, x: torch.Tensor, src_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -69,7 +81,7 @@ class EncoderLayer(nn.Module):
             norm_x = self.norm1(x)
             self_attn_output = self.self_attn(norm_x, norm_x, norm_x, mask=src_mask)
             x = x + self.dropout1(self_attn_output)
-            
+
             norm_x = self.norm2(x)
             ff_output = self.feed_forward(norm_x)
             x = x + self.dropout2(ff_output)
@@ -77,7 +89,7 @@ class EncoderLayer(nn.Module):
             # Post-layer normalization (original transformer)
             self_attn_output = self.self_attn(x, x, x, mask=src_mask)
             x = self.norm1(x + self.dropout1(self_attn_output))
-            
+
             ff_output = self.feed_forward(x)
             x = self.norm2(x + self.dropout2(ff_output))
 
@@ -106,7 +118,7 @@ class TransformerEncoder(nn.Module):
     ):
         """
         Initialize a transformer encoder.
-        
+
         Args:
             vocab_size: Size of the vocabulary
             embed_dim: Dimension of embeddings
@@ -123,74 +135,102 @@ class TransformerEncoder(nn.Module):
         self.positional_encoding = PositionalEncoding(embed_dim, max_seq_len)
         self.encoder_layers = nn.ModuleList(
             [
-                EncoderLayer(embed_dim, num_heads, ff_dim, dropout_rate, pre_norm, use_relative_pos, 
-                           max_seq_len, debug_mode, store_attention)
+                EncoderLayer(
+                    embed_dim,
+                    num_heads,
+                    ff_dim,
+                    dropout_rate,
+                    pre_norm,
+                    use_relative_pos,
+                    max_seq_len,
+                    debug_mode,
+                    store_attention,
+                )
                 for _ in range(num_layers)
             ]
         )
         self.dropout = nn.Dropout(dropout_rate)
-        
+
         # Final layer norm for pre-norm architecture
         self.final_norm = nn.LayerNorm(embed_dim) if pre_norm else None
-        
+
         # Gradient checkpointing to save memory
         self.use_gradient_checkpointing = use_gradient_checkpointing
-        
+
         # Debug mode and attention storage
         self.debug_mode = debug_mode
         self.store_attention = store_attention
 
-    def _layer_forward(self, layer: nn.Module, x: torch.Tensor, src_padding_mask: Optional[torch.Tensor]) -> torch.Tensor:
+    def _layer_forward(
+        self, layer: nn.Module, x: torch.Tensor, src_padding_mask: Optional[torch.Tensor]
+    ) -> torch.Tensor:
         """Helper function for gradient checkpointing."""
         return layer(x, src_padding_mask)
-    
-    def forward(self, input_ids: torch.Tensor, src_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+
+    def forward(
+        self, input_ids: torch.Tensor, src_padding_mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
         """
         Forward pass of the encoder.
-        
+
         Args:
             input_ids: Input token IDs [batch_size, seq_len]
             src_padding_mask: Source padding mask [batch_size, 1, 1, seq_len]
-            
+
         Returns:
             Encoder output [batch_size, seq_len, embed_dim]
         """
         if self.debug_mode:
             debug_print(input_ids, "input_ids", "Input token IDs", "Encoder: ")
             if src_padding_mask is not None:
-                debug_print(src_padding_mask, "src_padding_mask", "Source padding mask", "Encoder: ")
-                
+                debug_print(
+                    src_padding_mask, "src_padding_mask", "Source padding mask", "Encoder: "
+                )
+
         embeddings = self.token_embedding(input_ids)
         if self.debug_mode:
-            debug_print(embeddings, "token_embeddings", "Token embeddings before positional encoding", "Encoder: ")
-            
+            debug_print(
+                embeddings,
+                "token_embeddings",
+                "Token embeddings before positional encoding",
+                "Encoder: ",
+            )
+
         embeddings = self.positional_encoding(embeddings)
         if self.debug_mode:
-            debug_print(embeddings, "pos_embeddings", "Embeddings after positional encoding", "Encoder: ")
-            
+            debug_print(
+                embeddings, "pos_embeddings", "Embeddings after positional encoding", "Encoder: "
+            )
+
         x = self.dropout(embeddings)
 
         for i, layer in enumerate(self.encoder_layers):
             if self.debug_mode:
-                debug_print(x, f"encoder_layer_{i}_input", f"Input to encoder layer {i}", "Encoder: ")
-                
+                debug_print(
+                    x, f"encoder_layer_{i}_input", f"Input to encoder layer {i}", "Encoder: "
+                )
+
             if self.use_gradient_checkpointing and self.training:
                 x = torch.utils.checkpoint.checkpoint(
                     self._layer_forward, layer, x, src_padding_mask
                 )
             else:
                 x = layer(x, src_padding_mask)
-                
+
             if self.debug_mode:
-                debug_print(x, f"encoder_layer_{i}_output", f"Output from encoder layer {i}", "Encoder: ")
-            
+                debug_print(
+                    x, f"encoder_layer_{i}_output", f"Output from encoder layer {i}", "Encoder: "
+                )
+
         # Apply final normalization if using pre-norm
         if self.final_norm is not None:
             x = self.final_norm(x)
             if self.debug_mode:
-                debug_print(x, "encoder_final_norm", "Output after final layer normalization", "Encoder: ")
+                debug_print(
+                    x, "encoder_final_norm", "Output after final layer normalization", "Encoder: "
+                )
 
         if self.debug_mode:
             debug_print(x, "encoder_output", "Final encoder output", "Encoder: ")
-            
+
         return x
