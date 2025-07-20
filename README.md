@@ -20,24 +20,57 @@ A comprehensive implementation of the Transformer Encoder-Decoder architecture f
 - Debug mode for printing tensor shapes and values during execution
 - Visualization tools for attention weights and embeddings
 
-## Installation
+## 🛠️ Installation
 
-You can install the package using uv:
+Set up the virtual environment and install the package using [`uv`](https://github.com/astral-sh/uv):
 
 ```bash
 uv venv
 uv pip install -e .
 ```
 
-For development dependencies:
+Or install all dependencies in one step:
+
+```bash
+uv sync             # installs default dependencies
+uv sync --extra dev # installs [dev] group as well
+```
+
+For development setup:
 
 ```bash
 uv pip install -e ".[dev]"
-# or
-uv pip install -r requirements-dev.txt
 ```
 
-This will install all necessary dependencies, including `torch`.
+---
+
+## ✅ Running Tests
+
+This project uses [`pytest`](https://docs.pytest.org/) for testing. To run tests:
+
+```bash
+# Recommended: via uv
+uv run pytest
+```
+
+Other options:
+
+```bash
+# Run tests as a Python module
+python -m pytest
+
+# Run with verbose output
+python -m pytest -v
+
+# Show test print/log output
+python -m pytest -s
+
+# Run a specific test file
+python -m pytest tests/test_attention.py
+
+# Generate coverage report
+python -m pytest --cov=demo_transformer
+```
 
 ## Usage
 

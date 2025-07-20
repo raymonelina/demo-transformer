@@ -11,7 +11,6 @@ from .positional_encoding import PositionalEncoding
 from .relative_positional_encoding import RelativePositionalEncoding, RelativeMultiHeadAttention
 from .config import TransformerConfig
 from .training import TransformerTrainer, LabelSmoothingLoss, get_transformer_scheduler
-from .inference_utils import TransformerInference
 from .data import TransformerDataset, TransformerCollator, create_dataloaders
 from .debug_utils import debug_print
 from .visualization import plot_attention_weights, plot_embeddings_pca, plot_attention_heads
@@ -31,7 +30,6 @@ __all__ = [
     "TransformerTrainer",
     "LabelSmoothingLoss",
     "get_transformer_scheduler",
-    "TransformerInference",
     "TransformerDataset",
     "TransformerCollator",
     "create_dataloaders",
