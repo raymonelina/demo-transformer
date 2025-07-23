@@ -3,9 +3,9 @@ import pytest
 from demo_transformer.encoder import TransformerEncoder
 
 
-def test_transformer_encoder_dimensions():
-    """Test that the TransformerEncoder preserves sequence length and outputs correct embedding dimension."""
-    print("\n\nRunning test_transformer_encoder_dimensions\n")
+def test_transformer_encoder_standard_attention():
+    """Test the TransformerEncoder with standard attention."""
+    print("\n\nRunning test_transformer_encoder_standard_attention\n")
     # Setup
     batch_size = 2
     seq_len = 10
@@ -16,7 +16,7 @@ def test_transformer_encoder_dimensions():
     num_layers = 2
     max_seq_len = 100
     
-    # Create encoder with debug mode enabled
+    # Create encoder with standard attention
     encoder = TransformerEncoder(
         vocab_size=vocab_size,
         embed_dim=embed_dim,
@@ -24,6 +24,84 @@ def test_transformer_encoder_dimensions():
         ff_dim=ff_dim,
         num_layers=num_layers,
         max_seq_len=max_seq_len,
+        use_relative_pos=False,
+        use_rope=False,
+        debug_mode=True
+    )
+    
+    # Create input tensor
+    input_ids = torch.randint(0, vocab_size, (batch_size, seq_len))
+    
+    # Execute forward pass
+    output = encoder(input_ids)
+    
+    # Verify output dimensions
+    assert output.shape == (batch_size, seq_len, embed_dim)
+    assert not torch.isnan(output).any(), "Output contains NaN values"
+    assert not torch.isinf(output).any(), "Output contains infinite values"
+
+
+def test_transformer_encoder_relative_attention():
+    """Test the TransformerEncoder with relative positional attention."""
+    print("\n\nRunning test_transformer_encoder_relative_attention\n")
+    # Setup
+    batch_size = 2
+    seq_len = 10
+    vocab_size = 1000
+    embed_dim = 32
+    num_heads = 4
+    ff_dim = 64
+    num_layers = 2
+    max_seq_len = 100
+    
+    # Create encoder with relative positional attention
+    encoder = TransformerEncoder(
+        vocab_size=vocab_size,
+        embed_dim=embed_dim,
+        num_heads=num_heads,
+        ff_dim=ff_dim,
+        num_layers=num_layers,
+        max_seq_len=max_seq_len,
+        use_relative_pos=True,
+        use_rope=False,
+        debug_mode=True
+    )
+    
+    # Create input tensor
+    input_ids = torch.randint(0, vocab_size, (batch_size, seq_len))
+    
+    # Execute forward pass
+    output = encoder(input_ids)
+    
+    # Verify output dimensions
+    assert output.shape == (batch_size, seq_len, embed_dim)
+    assert not torch.isnan(output).any(), "Output contains NaN values"
+    assert not torch.isinf(output).any(), "Output contains infinite values"
+
+
+def test_transformer_encoder_rope_attention():
+    """Test the TransformerEncoder with RoPE attention."""
+    print("\n\nRunning test_transformer_encoder_rope_attention\n")
+    # Setup
+    batch_size = 2
+    seq_len = 10
+    vocab_size = 1000
+    embed_dim = 32
+    num_heads = 4
+    ff_dim = 64
+    num_layers = 2
+    max_seq_len = 100
+    
+    # Create encoder with RoPE attention
+    encoder = TransformerEncoder(
+        vocab_size=vocab_size,
+        embed_dim=embed_dim,
+        num_heads=num_heads,
+        ff_dim=ff_dim,
+        num_layers=num_layers,
+        max_seq_len=max_seq_len,
+        use_relative_pos=False,
+        use_rope=True,
         debug_mode=True
     )
     
