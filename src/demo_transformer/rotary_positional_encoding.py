@@ -19,6 +19,11 @@ class RotaryPositionalEncoding(nn.Module):
     which helps the model generalize better to sequences of different lengths.
     It directly modifies the query and key matrices in the attention mechanism
     rather than being added to the input embeddings.
+    
+    IMPORTANT: RoPE uses pre-computed, cached rotation matrices that are fixed
+    and do NOT change during training. Unlike learnable positional embeddings,
+    these rotation frequencies are computed once at initialization using a
+    deterministic mathematical formula and registered as buffers (not parameters).
     """
 
     def __init__(self, embed_dim: int, max_seq_len: int = 512):
@@ -62,7 +67,9 @@ class RotaryPositionalEncoding(nn.Module):
         # Convert to complex representation: [max_seq_len, dim/2]
         freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
         
-        # Register as buffer (not a parameter)
+        # Register as buffer (not a parameter) - this means the rotation matrices
+        # are part of the model state but are NOT updated during backpropagation
+        # Unlike nn.Parameter, buffers remain fixed throughout training
         self.register_buffer("_freqs_cis", freqs_cis)
         
         return freqs_cis

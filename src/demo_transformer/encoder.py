@@ -7,7 +7,7 @@ from typing import Optional, Tuple
 
 from .debug_utils import debug_print
 
-from .attention import MultiHeadAttention
+from .multi_head_attention import MultiHeadAttention
 from .relative_attention import RelativeMultiHeadAttention
 from .rope_attention import RoPEMultiHeadAttention
 from .feed_forward import FeedForwardBlock
@@ -19,6 +19,22 @@ from .rotary_positional_encoding import RotaryPositionalEncoding
 class EncoderLayer(nn.Module):
     """
     A single Transformer Encoder Layer.
+    
+    NORMALIZATION PLACEMENT:
+    - Post-norm (original): LayerNorm applied AFTER residual connection
+      From "Attention Is All You Need" (Vaswani et al., 2017)
+      Formula: LayerNorm(x + Sublayer(x))
+      
+    - Pre-norm (modern): LayerNorm applied BEFORE sublayer
+      From "Learning Deep Transformer Models for Machine Translation" (Wang et al., 2019)
+      and "On Layer Normalization in the Transformer Architecture" (Xiong et al., 2020)
+      Formula: x + Sublayer(LayerNorm(x))
+      
+    Pre-norm advantages:
+    - Better gradient flow and training stability
+    - Enables training much deeper models (100+ layers)
+    - Faster convergence and less sensitive to learning rate
+    - Used in GPT-2, T5, and most modern large language models
     """
 
     def __init__(
@@ -92,7 +108,8 @@ class EncoderLayer(nn.Module):
             Output tensor [batch_size, seq_len, embed_dim]
         """
         if self.pre_norm:
-            # Pre-layer normalization
+            # Pre-layer normalization: x + Sublayer(LayerNorm(x))
+            # Better gradient flow, enables deeper models (Wang et al., 2019)
             norm_x = self.norm1(x)
             self_attn_output = self.self_attn(norm_x, norm_x, norm_x, mask=src_mask)
             x = x + self.dropout1(self_attn_output)
@@ -101,7 +118,8 @@ class EncoderLayer(nn.Module):
             ff_output = self.feed_forward(norm_x)
             x = x + self.dropout2(ff_output)
         else:
-            # Post-layer normalization (original transformer)
+            # Post-layer normalization: LayerNorm(x + Sublayer(x))
+            # Original Transformer architecture (Vaswani et al., 2017)
             self_attn_output = self.self_attn(x, x, x, mask=src_mask)
             x = self.norm1(x + self.dropout1(self_attn_output))
 
@@ -154,7 +172,12 @@ class TransformerEncoder(nn.Module):
             # For RoPE, we still create a positional encoding object for API compatibility,
             # but the actual rotation is applied in the attention mechanism
             self.positional_encoding = RotaryPositionalEncoding(embed_dim, max_seq_len)
+        elif use_relative_pos:
+            # For relative attention, use learnable relative positional encodings
+            # These are used by RelativeMultiHeadAttention for position-aware attention
+            self.positional_encoding = RelativePositionalEncoding(embed_dim, max_seq_len)
         else:
+            # Standard sinusoidal positional encoding (original Transformer)
             self.positional_encoding = PositionalEncoding(embed_dim, max_seq_len)
             
         self.encoder_layers = nn.ModuleList(
@@ -179,7 +202,20 @@ class TransformerEncoder(nn.Module):
         # Final layer norm for pre-norm architecture
         self.final_norm = nn.LayerNorm(embed_dim) if pre_norm else None
 
-        # Gradient checkpointing to save memory
+        # Gradient checkpointing: Trade computation for memory
+        # Academic foundation: "Training Deep Nets with Sublinear Memory Cost" (Chen et al., 2016)
+        # Engineering optimization that enables training much larger models on limited GPU memory
+        # 
+        # How it works:
+        # - Forward pass: Only store activations at checkpoints, discard intermediate ones
+        # - Backward pass: Recompute discarded activations on-demand during backpropagation
+        # - Memory reduction: O(√n) instead of O(n) for n layers
+        # 
+        # Benefits:
+        # - Memory savings: ~50-80% reduction in activation memory
+        # - Enables larger batch sizes or deeper models on same hardware
+        # - Cost: ~33% increase in training time due to recomputation
+        # - Used in GPT-3, T5, and other large language models
         self.use_gradient_checkpointing = use_gradient_checkpointing
 
         # Debug mode and attention storage
@@ -221,11 +257,28 @@ class TransformerEncoder(nn.Module):
                 "Encoder: ",
             )
 
-        embeddings = self.positional_encoding(embeddings)
-        if self.debug_mode:
-            debug_print(
-                embeddings, "pos_embeddings", "Embeddings after positional encoding", "Encoder: "
-            )
+        # Apply positional encoding based on the type
+        if isinstance(self.positional_encoding, RelativePositionalEncoding):
+            # For relative attention, positional encoding is handled inside the attention mechanism
+            # Don't modify embeddings here - just pass them through
+            if self.debug_mode:
+                debug_print(
+                    embeddings, "pos_embeddings", "Embeddings (using RelativePositionalEncoding - handled in attention)", "Encoder: "
+                )
+        elif isinstance(self.positional_encoding, RotaryPositionalEncoding):
+            # For RoPE, positional encoding is applied in attention mechanism
+            embeddings = self.positional_encoding(embeddings)
+            if self.debug_mode:
+                debug_print(
+                    embeddings, "pos_embeddings", "Embeddings (using RotaryPositionalEncoding - applied in attention)", "Encoder: "
+                )
+        else:
+            # For standard sinusoidal positional encoding, apply to embeddings
+            embeddings = self.positional_encoding(embeddings)
+            if self.debug_mode:
+                debug_print(
+                    embeddings, "pos_embeddings", "Embeddings (using standard PositionalEncoding - added to embeddings)", "Encoder: "
+                )
 
         x = self.dropout(embeddings)
 
@@ -236,10 +289,13 @@ class TransformerEncoder(nn.Module):
                 )
 
             if self.use_gradient_checkpointing and self.training:
+                # Apply gradient checkpointing: save memory by recomputing activations
+                # Only during training - inference doesn't need gradients so no benefit
                 x = torch.utils.checkpoint.checkpoint(
                     self._layer_forward, layer, x, src_padding_mask
                 )
             else:
+                # Standard forward pass: store all intermediate activations
                 x = layer(x, src_padding_mask)
 
             if self.debug_mode:

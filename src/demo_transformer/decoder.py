@@ -7,7 +7,7 @@ from typing import Optional, Tuple
 
 from .debug_utils import debug_print
 
-from .attention import MultiHeadAttention
+from .multi_head_attention import MultiHeadAttention
 from .relative_attention import RelativeMultiHeadAttention
 from .rope_attention import RoPEMultiHeadAttention
 from .feed_forward import FeedForwardBlock

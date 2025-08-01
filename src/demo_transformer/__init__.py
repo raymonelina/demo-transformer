@@ -5,7 +5,7 @@ Transformer package for sequence-to-sequence tasks.
 from .transformer import Transformer
 from .encoder import TransformerEncoder
 from .decoder import TransformerDecoder
-from .attention import MultiHeadAttention
+from .multi_head_attention import MultiHeadAttention
 from .relative_attention import RelativeMultiHeadAttention
 from .rope_attention import RoPEMultiHeadAttention
 from .feed_forward import FeedForwardBlock

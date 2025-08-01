@@ -88,10 +88,12 @@ class RelativeMultiHeadAttention(nn.Module):
         # These embeddings capture the relative distance between tokens in the sequence
         self.rel_pos_encoding = RelativePositionalEncoding(self.head_dim, max_seq_len)
 
-        # Additional projection for relative positions - transforms position embeddings into key space
-        # This is analogous to the key projection in standard attention but specifically for positions
+        # Additional projection for relative positions - this generates the R in QR^T
+        # In the formula Attention(Q, K, V) = softmax(QK^T/√d + QR^T/√d)V:
+        # - rel_pos_encoding creates raw position embeddings
+        # - pos_key_proj transforms them into R (the projected relative position keys)
+        # This is analogous to how key_proj transforms content into K
         # The bias=False setting follows the original implementation and helps prevent overfitting
-        # This projection is critical for the model to learn how to effectively use position information
         self.pos_key_proj = nn.Linear(self.head_dim, self.head_dim, bias=False)
 
         # Debug mode and attention storage
@@ -102,6 +104,24 @@ class RelativeMultiHeadAttention(nn.Module):
     def _rel_shift(self, x: torch.Tensor) -> torch.Tensor:
         """
         Shift the relative logits to align them properly.
+        
+        This function converts relative position scores from a "full relative" representation
+        to a "query-key aligned" representation needed for attention computation.
+        
+        Example with seq_len=3:
+        Input x has shape [batch, heads, 3, 5] representing relative positions [-2, -1, 0, +1, +2]
+        
+        Concrete example - if input tensor x[0,0,:,:] contains:
+        [[a1, a2, a3, a4, a5],   # Query pos 0: scores for rel pos [-2,-1,0,+1,+2]
+         [b1, b2, b3, b4, b5],   # Query pos 1: scores for rel pos [-2,-1,0,+1,+2]
+         [c1, c2, c3, c4, c5]]   # Query pos 2: scores for rel pos [-2,-1,0,+1,+2]
+        
+        After shifting, output result[0,0,:,:] will be:
+        [[a3, a4, a5],   # Query pos 0 to key pos [0,1,2]: rel pos [0-0,1-0,2-0] = [0,+1,+2] → a3,a4,a5
+         [b2, b3, b4],   # Query pos 1 to key pos [0,1,2]: rel pos [0-1,1-1,2-1] = [-1,0,+1] → b2,b3,b4
+         [c1, c2, c3]]   # Query pos 2 to key pos [0,1,2]: rel pos [0-2,1-2,2-2] = [-2,-1,0] → c1,c2,c3
+        
+        This transforms from "all possible relative positions" to "actual query-key pairs"
 
         Args:
             x: Input tensor [batch_size, num_heads, seq_len, 2*seq_len-1]
@@ -109,24 +129,27 @@ class RelativeMultiHeadAttention(nn.Module):
         Returns:
             Shifted tensor [batch_size, num_heads, seq_len, seq_len]
         """
+        # Input tensor dimensions: [batch_size, num_heads, seq_len, 2*seq_len-1]
+        # Example: for seq_len=3, last dim has 5 positions for rel_pos [-2,-1,0,+1,+2]
         batch_size, num_heads, seq_len, _ = x.size()
         total_len = 2 * seq_len - 1
 
-        # Create a more robust implementation that doesn't rely on reshaping
-        # This avoids potential issues with tensor shapes
-        # We want to shift the scores so that scores corresponding to position 0 are at the center
-        
-        # First create the final output tensor directly
+        # Create the final output tensor: [batch_size, num_heads, seq_len, seq_len]
+        # This will contain only the valid query-key attention scores
         result = torch.zeros((batch_size, num_heads, seq_len, seq_len), device=x.device, dtype=x.dtype)
         
-        # Fill it with the appropriate values from the original tensor
-        # The center of the original tensor (position seq_len-1) corresponds to relative position 0
+        # The center of the input tensor (position seq_len-1) corresponds to relative position 0
+        # For seq_len=3: center_pos=2, so input[..., 2] = rel_pos 0
         center_pos = seq_len - 1
         
         for i in range(seq_len):
-            # For each position in the target sequence, copy the appropriate slice
-            # from the original tensor, shifted according to relative position
+            # For query position i, we need relative positions [i-0, i-1, i-2, ...] = [i, i-1, i-2, ...]
+            # These correspond to input positions [center_pos-i, center_pos-i+1, center_pos-i+2, ...]
+            # Example: query_pos=0 needs rel_pos [0,-1,-2] → input positions [2,1,0]
+            #          query_pos=1 needs rel_pos [1,0,-1] → input positions [1,2,3]
             start_pos = center_pos - i
+            # Slice exactly seq_len positions: [start_pos : start_pos + seq_len]
+            # This gives us [batch, heads, query_i, key_0:seq_len] attention scores
             result[:, :, i, :] = x[:, :, i, start_pos:start_pos + seq_len]
             
         return result
@@ -188,14 +211,20 @@ class RelativeMultiHeadAttention(nn.Module):
                 V, "rel_V_reshaped", "Value after reshaping for multi-head", "RelativeAttention: "
             )
 
-        # Get relative position embeddings [2*seq_len_k-1, head_dim]
+        # Step 1: Get relative position embeddings for all possible relative distances
+        # For seq_len_k=3, this creates embeddings for relative positions [-2, -1, 0, +1, +2]
+        # Shape: [2*seq_len_k-1, head_dim] = [5, head_dim]
+        # These are learnable embeddings that encode the "meaning" of each relative distance
         rel_pos_emb = self.rel_pos_encoding(seq_len_k)
         if self.debug_mode:
             debug_print(
                 rel_pos_emb, "rel_pos_emb", "Relative position embeddings", "RelativeAttention: "
             )
 
-        # Project relative position embeddings
+        # Step 2: Project relative position embeddings into "key space"
+        # This transforms position embeddings so they can be compared with queries
+        # Just like content keys are projected, position embeddings need projection too
+        # Shape remains: [2*seq_len_k-1, head_dim]
         rel_pos_key = self.pos_key_proj(rel_pos_emb)
         if self.debug_mode:
             debug_print(
@@ -205,7 +234,10 @@ class RelativeMultiHeadAttention(nn.Module):
                 "RelativeAttention: ",
             )
 
-        # Content-content attention
+        # Step 3: Compute standard content-content attention (like regular attention)
+        # This captures semantic similarity: "cat" attending to "sat" based on meaning
+        # Q: [batch, heads, seq_len_q, head_dim], K: [batch, heads, seq_len_k, head_dim]
+        # Result: [batch, heads, seq_len_q, seq_len_k]
         content_scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim)
         if self.debug_mode:
             debug_print(
@@ -215,9 +247,15 @@ class RelativeMultiHeadAttention(nn.Module):
                 "RelativeAttention: ",
             )
 
-        # Content-position attention
-        # [batch_size, num_heads, seq_len_q, 2*seq_len_k-1]
+        # Step 4: Compute content-position attention (the key innovation)
+        # This captures positional preferences: "verbs often attend to subjects 2 positions back"
+        # Add batch and head dimensions to rel_pos_key for broadcasting
+        # rel_pos_key: [2*seq_len_k-1, head_dim] → [1, 1, 2*seq_len_k-1, head_dim]
         rel_pos_key = rel_pos_key.unsqueeze(0).unsqueeze(0)
+        
+        # Q: [batch, heads, seq_len_q, head_dim] × rel_pos_key^T: [1, 1, head_dim, 2*seq_len_k-1]
+        # Result: [batch, heads, seq_len_q, 2*seq_len_k-1]
+        # Each query gets scores for ALL possible relative positions [-2,-1,0,+1,+2]
         position_scores = torch.matmul(Q, rel_pos_key.transpose(-2, -1)) / math.sqrt(self.head_dim)
         if self.debug_mode:
             debug_print(
@@ -228,6 +266,8 @@ class RelativeMultiHeadAttention(nn.Module):
             )
 
         # Shift and slice position scores to align them
+        # Input: [batch, heads, seq_len_q, 2*seq_len_k-1] → Output: [batch, heads, seq_len_q, seq_len_k]
+        # This transforms from "all possible relative positions" to "actual query-key pairs"
         rel_position_scores = self._rel_shift(position_scores)
         if self.debug_mode:
             debug_print(
