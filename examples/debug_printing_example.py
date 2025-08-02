@@ -27,8 +27,9 @@ def main():
     src_seq_len = 8
     tgt_seq_len = 6
     
-    src_ids = torch.randint(0, config.src_vocab_size, (batch_size, src_seq_len))
-    tgt_ids = torch.randint(0, config.tgt_vocab_size, (batch_size, tgt_seq_len))
+    src_ids = torch.randint(1, config.src_vocab_size, (batch_size, src_seq_len))
+    tgt_ids = torch.randint(1, config.tgt_vocab_size, (batch_size, tgt_seq_len))
+    tgt_ids[:, 0] = 1  # SOS token
     
     # Create padding masks
     src_padding_mask = torch.zeros(batch_size, 1, 1, src_seq_len).bool()

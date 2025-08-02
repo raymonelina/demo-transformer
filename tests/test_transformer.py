@@ -32,8 +32,9 @@ def test_transformer_standard_attention():
     transformer = Transformer(config)
     
     # Create input tensors
-    src_ids = torch.randint(0, vocab_size, (batch_size, src_seq_len))
-    tgt_ids = torch.randint(0, vocab_size, (batch_size, tgt_seq_len))
+    src_ids = torch.randint(1, vocab_size, (batch_size, src_seq_len))
+    tgt_ids = torch.randint(1, vocab_size, (batch_size, tgt_seq_len))
+    tgt_ids[:, 0] = 1  # SOS token
     
     # Execute forward pass
     output = transformer(src_ids, tgt_ids)
@@ -72,8 +73,9 @@ def test_transformer_relative_attention():
     transformer = Transformer(config)
     
     # Create input tensors with the same sequence length
-    src_ids = torch.randint(0, vocab_size, (batch_size, seq_len))
-    tgt_ids = torch.randint(0, vocab_size, (batch_size, seq_len))
+    src_ids = torch.randint(1, vocab_size, (batch_size, seq_len))
+    tgt_ids = torch.randint(1, vocab_size, (batch_size, seq_len))
+    tgt_ids[:, 0] = 1  # SOS token
     
     # Execute forward pass
     output = transformer(src_ids, tgt_ids)
@@ -116,8 +118,9 @@ def test_transformer_rope_attention():
     transformer = Transformer(config)
     
     # Create input tensors with the same sequence length
-    src_ids = torch.randint(0, vocab_size, (batch_size, seq_len))
-    tgt_ids = torch.randint(0, vocab_size, (batch_size, seq_len))
+    src_ids = torch.randint(1, vocab_size, (batch_size, seq_len))
+    tgt_ids = torch.randint(1, vocab_size, (batch_size, seq_len))
+    tgt_ids[:, 0] = 1  # SOS token
     
     # Execute forward pass
     output = transformer(src_ids, tgt_ids)
@@ -154,8 +157,9 @@ def test_transformer_with_padding_masks():
     transformer = Transformer(config)
     
     # Create input tensors
-    src_ids = torch.randint(0, vocab_size, (batch_size, src_seq_len))
-    tgt_ids = torch.randint(0, vocab_size, (batch_size, tgt_seq_len))
+    src_ids = torch.randint(1, vocab_size, (batch_size, src_seq_len))
+    tgt_ids = torch.randint(1, vocab_size, (batch_size, tgt_seq_len))
+    tgt_ids[:, 0] = 1  # SOS token
     
     # Create source padding mask (mask out the last 2 tokens)
     src_padding_mask = torch.zeros(batch_size, 1, 1, src_seq_len, dtype=torch.bool)
@@ -201,8 +205,9 @@ def test_transformer_encode_decode_methods():
     transformer = Transformer(config)
     
     # Create input tensors
-    src_ids = torch.randint(0, vocab_size, (batch_size, src_seq_len))
-    tgt_ids = torch.randint(0, vocab_size, (batch_size, tgt_seq_len))
+    src_ids = torch.randint(1, vocab_size, (batch_size, src_seq_len))
+    tgt_ids = torch.randint(1, vocab_size, (batch_size, tgt_seq_len))
+    tgt_ids[:, 0] = 1  # SOS token
     
     # Test encode method
     encoder_output = transformer.encode(src_ids)
@@ -292,8 +297,9 @@ def test_transformer_save_load(tmp_path):
     transformer = Transformer(config)
     
     # Create input tensors
-    src_ids = torch.randint(0, vocab_size, (batch_size, src_seq_len))
-    tgt_ids = torch.randint(0, vocab_size, (batch_size, tgt_seq_len))
+    src_ids = torch.randint(1, vocab_size, (batch_size, src_seq_len))
+    tgt_ids = torch.randint(1, vocab_size, (batch_size, tgt_seq_len))
+    tgt_ids[:, 0] = 1  # SOS token
     
     # Save the model
     model_path = tmp_path / "transformer_test.pt"

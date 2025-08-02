@@ -57,8 +57,9 @@ def main():
     src_seq_len = 20
     tgt_seq_len = 15
     
-    src_ids = torch.randint(0, config.src_vocab_size, (batch_size, src_seq_len)).to(device)
-    tgt_ids = torch.randint(0, config.tgt_vocab_size, (batch_size, tgt_seq_len)).to(device)
+    src_ids = torch.randint(1, config.src_vocab_size, (batch_size, src_seq_len)).to(device)
+    tgt_ids = torch.randint(1, config.tgt_vocab_size, (batch_size, tgt_seq_len)).to(device)
+    tgt_ids[:, 0] = 1  # SOS token
     
     src_padding_mask = torch.zeros(batch_size, 1, 1, src_seq_len, dtype=torch.bool).to(device)
     src_padding_mask[0, :, :, 15:] = True  # Add padding to first sequence

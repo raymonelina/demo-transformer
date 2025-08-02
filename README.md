@@ -116,23 +116,38 @@ model.save_pretrained("./my_model")
 
 ```python
 from demo_transformer import TransformerDataset, create_dataloaders
+import torch
 
-# Prepare tokenized data (token IDs)
-src_train = [
-    [1, 245, 678, 2],      # [SOS, "Hello", "world", EOS]
-    [1, 123, 456, 789, 2], # [SOS, "How", "are", "you?", EOS]
-]
-tgt_train = [
-    [1, 891, 234, 2],      # [SOS, "Bonjour", "monde", EOS]
-    [1, 567, 890, 123, 2], # [SOS, "Comment", "allez-vous?", EOS]
-]
+# For demonstration, create random token sequences
+# In practice, these would be tokenized text data
+batch_size = 2
+src_vocab_size = 1000
+tgt_vocab_size = 1200
+
+# Generate source sequences with different lengths
+src_lengths = [12, 8]
+source_seq_len = max(src_lengths)
+src_train = torch.randint(1, src_vocab_size, (batch_size, source_seq_len))
+
+# Generate target sequences starting with SOS token
+tgt_lengths = [6, 9] 
+target_seq_len = max(tgt_lengths)
+tgt_train = torch.randint(1, tgt_vocab_size, (batch_size, target_seq_len))
+tgt_train[:, 0] = 1  # SOS token
+
+# Add padding where needed
+pad_token_id = 0
+for i, length in enumerate(src_lengths):
+    src_train[i, length:] = pad_token_id
+for i, length in enumerate(tgt_lengths):
+    tgt_train[i, length:] = pad_token_id
 
 # Create dataloaders
 train_loader, val_loader = create_dataloaders(
-    src_train=src_train,
-    tgt_train=tgt_train,
+    src_train=src_train.tolist(),
+    tgt_train=tgt_train.tolist(),
     batch_size=32,
-    pad_token_id=0
+    pad_token_id=pad_token_id
 )
 ```
 

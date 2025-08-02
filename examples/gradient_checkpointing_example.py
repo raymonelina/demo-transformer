@@ -117,8 +117,9 @@ def main():
     batch_size = 8
     seq_len = 256
     
-    src_ids = torch.randint(0, base_config.src_vocab_size, (batch_size, seq_len)).to(device)
-    tgt_ids = torch.randint(0, base_config.tgt_vocab_size, (batch_size, seq_len)).to(device)
+    src_ids = torch.randint(1, base_config.src_vocab_size, (batch_size, seq_len)).to(device)
+    tgt_ids = torch.randint(1, base_config.tgt_vocab_size, (batch_size, seq_len)).to(device)
+    tgt_ids[:, 0] = 1  # SOS token
     src_padding_mask = torch.zeros(batch_size, 1, 1, seq_len, dtype=torch.bool).to(device)
     
     print(f"Input shapes - Source: {src_ids.shape}, Target: {tgt_ids.shape}")

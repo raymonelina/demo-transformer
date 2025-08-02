@@ -33,12 +33,13 @@ def main():
     src_seq_len = 10
     tgt_seq_len = 8
     
-    src_ids = torch.randint(1, 100, (batch_size, src_seq_len))
-    tgt_ids = torch.randint(1, 100, (batch_size, tgt_seq_len))
+    src_ids = torch.randint(1, config.src_vocab_size, (batch_size, src_seq_len))
+    tgt_ids = torch.randint(1, config.tgt_vocab_size, (batch_size, tgt_seq_len))
+    tgt_ids[:, 0] = 1  # SOS token
     
-    # Create padding masks
-    src_padding_mask = torch.ones(batch_size, 1, 1, src_seq_len)
-    tgt_padding_mask = torch.tril(torch.ones(batch_size, 1, tgt_seq_len, tgt_seq_len))
+    # Create padding masks (False = attend, True = mask)
+    src_padding_mask = torch.zeros(batch_size, 1, 1, src_seq_len, dtype=torch.bool)
+    tgt_padding_mask = torch.zeros(batch_size, 1, tgt_seq_len, tgt_seq_len, dtype=torch.bool)
     
     print("\nRunning forward pass with RoPE...")
     output = model(src_ids, tgt_ids, src_padding_mask, tgt_padding_mask)

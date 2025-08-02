@@ -133,7 +133,7 @@ class TransformerCollator:
         ]),
         "tgt_ids": tensor([
             [1, 891, 234, 2],  # No padding needed
-            [1, 567, 890, 2]   # No padding needed
+            [1, 567, 890, 0]   # Padded with 1 zero
         ]),
         "src_padding_mask": tensor([...]),  # Source padding positions
         "tgt_padding_mask": tensor([...])   # Target padding positions
@@ -277,7 +277,8 @@ def create_dataloaders(
     1. Tokenize text: "Hello world" → ["Hello", "world"]
     2. Convert to IDs: ["Hello", "world"] → [245, 678]
     3. Add special tokens: [245, 678] → [1, 245, 678, 2] (SOS + tokens + EOS)
-    4. Ensure consistent vocabulary between source and target (or separate vocabs)
+    4. For demo purposes, random token IDs can be used: torch.randint(1, vocab_size, (seq_len,))
+    5. Ensure consistent vocabulary between source and target (or separate vocabs)
     
     Args:
         src_train: Source training sequences (list of token ID lists)
