@@ -79,11 +79,20 @@ def main():
     dummy_src_padding_mask = torch.zeros(batch_size, 1, 1, source_seq_len, dtype=torch.bool).to(device)
     dummy_src_padding_mask[1, :, :, 10:] = True  # Add padding to second sequence
     
-    # Create dummy target data
+    # Create dummy target data with padding mask
     dummy_tgt_ids = torch.randint(0, config.tgt_vocab_size, (batch_size, target_seq_len)).to(device)
     dummy_tgt_ids[:, 0] = config.sos_token_id  # Start with SOS token
     dummy_tgt_ids[0, 5:] = config.pad_token_id  # Add padding
     dummy_tgt_ids[1, 7:] = config.pad_token_id  # Add padding
+    
+    # Create target padding mask
+    dummy_tgt_padding_mask = torch.zeros(batch_size, 1, target_seq_len, target_seq_len, dtype=torch.bool).to(device)
+    # Mask padding positions for first sequence (positions 5-9)
+    dummy_tgt_padding_mask[0, :, 5:, :] = True  # Mask rows (queries)
+    dummy_tgt_padding_mask[0, :, :, 5:] = True  # Mask columns (keys)
+    # Mask padding positions for second sequence (positions 7-9)
+    dummy_tgt_padding_mask[1, :, 7:, :] = True  # Mask rows (queries)
+    dummy_tgt_padding_mask[1, :, :, 7:] = True  # Mask columns (keys)
     
     print(f"Dummy Source IDs shape: {dummy_src_ids.shape}")
     print(f"Dummy Target IDs shape: {dummy_tgt_ids.shape}")
@@ -97,11 +106,14 @@ def main():
         "src_ids": dummy_src_ids,
         "tgt_ids": dummy_tgt_ids,
         "src_padding_mask": dummy_src_padding_mask,
+        "tgt_padding_mask": dummy_tgt_padding_mask,
     }
     
-    # Perform a training step
+    # Perform a training step with both masks
     metrics = trainer.train_step(
-        dummy_src_ids, dummy_tgt_ids, src_padding_mask=dummy_src_padding_mask
+        dummy_src_ids, dummy_tgt_ids, 
+        src_padding_mask=dummy_src_padding_mask,
+        tgt_padding_mask=dummy_tgt_padding_mask
     )
     print(f"Training loss: {metrics['loss']:.4f}")
     

@@ -200,6 +200,7 @@ class Transformer(nn.Module):
         tgt_ids: torch.Tensor,
         encoder_output: torch.Tensor,
         src_padding_mask: Optional[torch.Tensor] = None,
+        tgt_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Decode with target sequence and encoder output - USED FOR INFERENCE (Step 2 of 2).
@@ -222,7 +223,7 @@ class Transformer(nn.Module):
         Returns:
             Decoder logits [batch_size, current_seq_len, tgt_vocab_size]
         """
-        return self.decoder(tgt_ids, encoder_output, src_padding_mask)
+        return self.decoder(tgt_ids, encoder_output, src_padding_mask, tgt_padding_mask)
 
     @classmethod
     def from_pretrained(cls, model_path: str) -> "Transformer":

@@ -178,12 +178,17 @@ class TransformerTrainer:
         input_tgt_ids = tgt_ids[:, :-1]  # Remove last token
         target_tgt_ids = tgt_ids[:, 1:]  # Remove first token (usually SOS)
         
-        # Forward pass
+        # Adjust target padding mask for input sequence (remove last position)
+        input_tgt_padding_mask = None
+        if tgt_padding_mask is not None:
+            input_tgt_padding_mask = tgt_padding_mask[:, :, :-1, :-1]
+        
+        # Forward pass with both source and target masks
         logits = self.model(
             src_ids, 
             input_tgt_ids, 
             src_padding_mask=src_padding_mask,
-            tgt_padding_mask=tgt_padding_mask
+            tgt_padding_mask=input_tgt_padding_mask
         )
         
         # Calculate loss
@@ -267,12 +272,17 @@ class TransformerTrainer:
                 input_tgt_ids = tgt_ids[:, :-1]  # Remove last token
                 target_tgt_ids = tgt_ids[:, 1:]  # Remove first token (usually SOS)
                 
-                # Forward pass
+                # Adjust target padding mask for input sequence (remove last position)
+                input_tgt_padding_mask = None
+                if tgt_padding_mask is not None:
+                    input_tgt_padding_mask = tgt_padding_mask[:, :, :-1, :-1]
+                
+                # Forward pass with both source and target masks
                 logits = self.model(
                     src_ids, 
                     input_tgt_ids, 
                     src_padding_mask=src_padding_mask,
-                    tgt_padding_mask=tgt_padding_mask
+                    tgt_padding_mask=input_tgt_padding_mask
                 )
                 
                 # Calculate loss

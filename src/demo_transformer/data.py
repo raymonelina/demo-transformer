@@ -95,17 +95,23 @@ class TransformerDataset(Dataset):
 
 class TransformerCollator:
     """
-    Collator for transformer batches with dynamic padding.
+    Collator for transformer batches with dynamic padding and mask creation.
     
     This collator handles batching of variable-length sequences by:
     1. Finding the maximum length in each batch
     2. Padding all sequences to that length
     3. Creating attention masks to ignore padding tokens
     
+    Three Types of Masks in Transformer:
+    1. Source Padding Mask: Prevents attention to source padding tokens
+    2. Target Padding Mask: Prevents attention to target padding tokens  
+    3. Causal Mask: Prevents attention to future tokens (generated in decoder)
+    
     Batch Output Format:
     - src_ids: [batch_size, max_src_len] - Source token IDs
     - tgt_ids: [batch_size, max_tgt_len] - Target token IDs
     - src_padding_mask: [batch_size, 1, 1, max_src_len] - Source padding mask
+    - tgt_padding_mask: [batch_size, 1, max_tgt_len, max_tgt_len] - Target padding mask
     
     Padding Mask Convention:
     - False (0): Real tokens (attend to these)
@@ -129,10 +135,8 @@ class TransformerCollator:
             [1, 891, 234, 2],  # No padding needed
             [1, 567, 890, 2]   # No padding needed
         ]),
-        "src_padding_mask": tensor([
-            [[[False, False, False, False, True, True]]],   # Last 2 are padding
-            [[[False, False, False, False, False, False]]]  # No padding
-        ])
+        "src_padding_mask": tensor([...]),  # Source padding positions
+        "tgt_padding_mask": tensor([...])   # Target padding positions
     }
     ```
     """
@@ -154,27 +158,33 @@ class TransformerCollator:
         
     def __call__(self, batch: List[Dict[str, List[int]]]) -> Dict[str, torch.Tensor]:
         """
-        Collate a batch of samples.
+        Collate a batch of samples with dynamic padding and mask creation.
+        
+        Creates both source and target padding masks to handle variable-length sequences.
+        The target padding mask will be combined with the causal mask in the decoder.
         
         Args:
             batch: List of samples from the dataset
             
         Returns:
-            Batch dictionary with padded tensors
+            Batch dictionary with padded tensors and attention masks
         """
-        # Get max lengths
+        # Find maximum sequence lengths in this batch
         src_max_len = max(len(sample["src_ids"]) for sample in batch)
         tgt_max_len = max(len(sample["tgt_ids"]) for sample in batch)
         
-        # Prepare tensors
+        # Initialize padded tensors filled with padding token
         batch_size = len(batch)
         src_ids = torch.full((batch_size, src_max_len), self.pad_token_id, dtype=torch.long)
         tgt_ids = torch.full((batch_size, tgt_max_len), self.pad_token_id, dtype=torch.long)
         
-        # Create padding masks (False=real tokens, True=padding)
+        # Create padding masks (False=real tokens, True=padding tokens)
+        # Source mask: [batch_size, 1, 1, src_max_len] for cross-attention
         src_padding_mask = torch.zeros((batch_size, 1, 1, src_max_len), dtype=torch.bool)
+        # Target mask: [batch_size, 1, tgt_max_len, tgt_max_len] for self-attention
+        tgt_padding_mask = torch.zeros((batch_size, 1, tgt_max_len, tgt_max_len), dtype=torch.bool)
         
-        # Fill tensors and masks
+        # Process each sample in the batch
         for i, sample in enumerate(batch):
             src = sample["src_ids"]
             tgt = sample["tgt_ids"]
@@ -182,23 +192,34 @@ class TransformerCollator:
             src_len = len(src)
             tgt_len = len(tgt)
             
-            # Fill source and target tensors
+            # Copy actual token IDs into padded tensors
             src_ids[i, :src_len] = torch.tensor(src, dtype=torch.long)
             tgt_ids[i, :tgt_len] = torch.tensor(tgt, dtype=torch.long)
             
-            # Mark padding positions as True (will be ignored by attention)
+            # Mark padding positions as True (will be masked out in attention)
+            # Source padding mask: mask positions beyond actual sequence length
             src_padding_mask[i, :, :, src_len:] = True
+            
+            # Target padding mask: mask padding positions in both query and key dimensions
+            # This creates a mask where padded positions cannot attend or be attended to
+            if tgt_len < tgt_max_len:
+                # Mask rows (queries) corresponding to padding positions
+                tgt_padding_mask[i, :, tgt_len:, :] = True
+                # Mask columns (keys) corresponding to padding positions
+                tgt_padding_mask[i, :, :, tgt_len:] = True
         
-        # Move to device if specified
+        # Move tensors to specified device if provided
         if self.device is not None:
             src_ids = src_ids.to(self.device)
             tgt_ids = tgt_ids.to(self.device)
             src_padding_mask = src_padding_mask.to(self.device)
+            tgt_padding_mask = tgt_padding_mask.to(self.device)
         
         return {
             "src_ids": src_ids,
             "tgt_ids": tgt_ids,
             "src_padding_mask": src_padding_mask,
+            "tgt_padding_mask": tgt_padding_mask,
         }
 
 
@@ -242,12 +263,13 @@ def create_dataloaders(
     
     # 3. Use in training loop
     for batch in train_loader:
-        src_ids = batch["src_ids"]          # [batch_size, max_src_len]
-        tgt_ids = batch["tgt_ids"]          # [batch_size, max_tgt_len]
-        src_mask = batch["src_padding_mask"] # [batch_size, 1, 1, max_src_len]
+        src_ids = batch["src_ids"]              # [batch_size, max_src_len]
+        tgt_ids = batch["tgt_ids"]              # [batch_size, max_tgt_len]
+        src_mask = batch["src_padding_mask"]     # [batch_size, 1, 1, max_src_len]
+        tgt_mask = batch["tgt_padding_mask"]     # [batch_size, 1, max_tgt_len, max_tgt_len]
         
-        # Forward pass
-        logits = model(src_ids, tgt_ids[:, :-1], src_mask)
+        # Forward pass with both masks
+        logits = model(src_ids, tgt_ids[:, :-1], src_mask, tgt_mask[:, :, :-1, :-1])
         loss = criterion(logits.view(-1, vocab_size), tgt_ids[:, 1:].reshape(-1))
     ```
     
