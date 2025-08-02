@@ -292,7 +292,7 @@ class TransformerEncoder(nn.Module):
                 # Apply gradient checkpointing: save memory by recomputing activations
                 # Only during training - inference doesn't need gradients so no benefit
                 x = torch.utils.checkpoint.checkpoint(
-                    self._layer_forward, layer, x, src_padding_mask
+                    self._layer_forward, layer, x, src_padding_mask, use_reentrant=False
                 )
             else:
                 # Standard forward pass: store all intermediate activations

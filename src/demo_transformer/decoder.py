@@ -330,7 +330,7 @@ class TransformerDecoder(nn.Module):
 
             if self.use_gradient_checkpointing and self.training:
                 x = torch.utils.checkpoint.checkpoint(
-                    self._layer_forward, layer, x, encoder_output, tgt_mask, src_padding_mask
+                    self._layer_forward, layer, x, encoder_output, tgt_mask, src_padding_mask, use_reentrant=False
                 )
             else:
                 x = layer(x, encoder_output, tgt_mask=tgt_mask, src_mask=src_padding_mask)
