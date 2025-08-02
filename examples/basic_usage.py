@@ -157,7 +157,6 @@ def main():
     print("\n--- Saving and Loading Model ---")
     model_path = "transformer_model.pt"
     transformer_model.save_pretrained(model_path)
-    print(f"Model saved to {model_path}")
     
     # Load the model
     loaded_model = Transformer.from_pretrained(model_path)

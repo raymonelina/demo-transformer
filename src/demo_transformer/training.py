@@ -61,8 +61,8 @@ class LabelSmoothingLoss(nn.Module):
         and the predicted distribution: KL(q_smooth || p_pred) = -∑ q_smooth * log(p_pred)
         
         Args:
-            pred: Prediction logits [batch_size, seq_len, vocab_size]
-            target: Target indices [batch_size, seq_len]
+            pred: Prediction logits [batch_size * seq_len, vocab_size] (flattened)
+            target: Target indices [batch_size * seq_len] (flattened)
             
         Returns:
             Smoothed loss value
@@ -78,7 +78,7 @@ class LabelSmoothingLoss(nn.Module):
             
             # Correct class gets probability: (1-ε)
             # scatter_ fills the correct positions with confidence value
-            true_dist.scatter_(2, target.unsqueeze(2), self.confidence)
+            true_dist.scatter_(1, target.unsqueeze(1), self.confidence)
             
             # Ignore padding tokens by setting their distribution to zero
             mask = (target == self.ignore_index).unsqueeze(-1)
