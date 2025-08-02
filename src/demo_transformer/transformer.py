@@ -1,5 +1,6 @@
 """Transformer model implementation."""
 
+import os
 import torch
 import torch.nn as nn
 from typing import Optional, Dict, Any, Union, List, Tuple
@@ -83,11 +84,65 @@ class Transformer(nn.Module):
         tgt_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
-        Forward pass of the transformer model.
+        Forward pass of the transformer model - USED FOR TRAINING with teacher forcing.
+        
+        TEACHER FORCING explained:
+        During training, we feed the correct target sequence as input, rather than using
+        the model's own predictions. This allows parallel processing of all positions.
+        
+        Example - Training to translate "I love cats" → "J'aime les chats":
+        
+        ENCODER:
+        - Input (src_ids):  ["I", "love", "cats"]     # English source
+        - Output: encoder_output                      # Understanding of English meaning
+        
+        DECODER (with teacher forcing):
+        - Input (tgt_ids):  [SOS, "J'aime", "les", "chats"]  # Correct French as input
+        - Uses: encoder_output + tgt_ids                     # English meaning + French context
+        - Target output: ["J'aime", "les", "chats", EOS]     # What we want to predict
+        
+        KEY DIFFERENCE - Where do the French words come from?
+        
+        TRAINING (Teacher Forcing - PARALLEL):
+        - We GIVE the model the correct French: [SOS, "J'aime", "les", "chats"]
+        - Model processes ALL positions at once:
+          Position 0: English + SOS → predict "J'aime" (we know answer is "J'aime")
+          Position 1: English + [SOS, "J'aime"] → predict "les" (we know answer is "les")
+          Position 2: English + [SOS, "J'aime", "les"] → predict "chats" (we know answer is "chats")
+          Position 3: English + [SOS, "J'aime", "les", "chats"] → predict EOS (we know answer is EOS)
+        
+        INFERENCE (No Teacher Forcing - SEQUENTIAL):
+        - Model must GENERATE its own French words step by step:
+          Step 1: English + [SOS] → predict "J'aime" (model's guess)
+          Step 2: English + [SOS, "J'aime"] → predict "les" (using its own "J'aime")
+          Step 3: English + [SOS, "J'aime", "les"] → predict "chats" (using its own words)
+          Step 4: English + [SOS, "J'aime", "les", "chats"] → predict EOS (using its own words)
+        
+        Training: Uses CORRECT French words (fast, parallel)
+        Inference: Uses MODEL'S OWN French words (slow, sequential, can make mistakes)
+        
+        MASKING'S ROLE in Teacher Forcing:
+        Even though we give the model ALL French words [SOS, "J'aime", "les", "chats"],
+        masking prevents cheating by blocking future tokens:
+        
+        Position 0 (predicting "J'aime"):
+        - Can see: [SOS] ✓
+        - MASKED: ["J'aime", "les", "chats"] ✗ (blocked by causal mask)
+        
+        Position 1 (predicting "les"):
+        - Can see: [SOS, "J'aime"] ✓
+        - MASKED: ["les", "chats"] ✗ (blocked by causal mask)
+        
+        Position 2 (predicting "chats"):
+        - Can see: [SOS, "J'aime", "les"] ✓
+        - MASKED: ["chats"] ✗ (blocked by causal mask)
+        
+        Without masking, the model would cheat by looking at future answers!
+        Teacher forcing makes training faster (parallel) and more stable (uses correct tokens).
 
         Args:
             src_ids: Source token IDs [batch_size, src_seq_len]
-            tgt_ids: Target token IDs [batch_size, tgt_seq_len]
+            tgt_ids: Complete target token IDs [batch_size, tgt_seq_len]
             src_padding_mask: Source padding mask [batch_size, 1, 1, src_seq_len]
             tgt_padding_mask: Target padding mask [batch_size, 1, tgt_seq_len, tgt_seq_len]
 
@@ -121,7 +176,23 @@ class Transformer(nn.Module):
     def encode(
         self, src_ids: torch.Tensor, src_padding_mask: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
-        """Encode the source sequence."""
+        """
+        Encode the source sequence - USED FOR INFERENCE (Step 1 of 2).
+        
+        This method encodes the source sequence once and returns the encoder output,
+        which can be reused for multiple decoding steps during autoregressive generation.
+        
+        Inference usage:
+        encoder_output = model.encode(src_ids, src_padding_mask)  # Call once
+        # Then use encoder_output multiple times in decode() for token generation
+        
+        Args:
+            src_ids: Source token IDs [batch_size, src_seq_len]
+            src_padding_mask: Source padding mask [batch_size, 1, 1, src_seq_len]
+            
+        Returns:
+            Encoder output [batch_size, src_seq_len, embed_dim]
+        """
         return self.encoder(src_ids, src_padding_mask)
 
     def decode(
@@ -130,7 +201,27 @@ class Transformer(nn.Module):
         encoder_output: torch.Tensor,
         src_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        """Decode with target sequence and encoder output."""
+        """
+        Decode with target sequence and encoder output - USED FOR INFERENCE (Step 2 of 2).
+        
+        This method takes a partial target sequence and generates predictions for the next token.
+        Called iteratively during autoregressive generation, where the sequence grows one token
+        at a time: [SOS] → [SOS, token1] → [SOS, token1, token2] → ...
+        
+        Inference usage:
+        for step in range(max_len):
+            current_seq = [SOS, generated_token1, generated_token2, ...]  # Growing sequence
+            logits = model.decode(current_seq, encoder_output, src_padding_mask)
+            next_token = argmax(logits[:, -1, :])  # Only use prediction for last position
+            
+        Args:
+            tgt_ids: Partial target sequence [batch_size, current_seq_len]
+            encoder_output: Pre-computed encoder output [batch_size, src_seq_len, embed_dim]
+            src_padding_mask: Source padding mask [batch_size, 1, 1, src_seq_len]
+            
+        Returns:
+            Decoder logits [batch_size, current_seq_len, tgt_vocab_size]
+        """
         return self.decoder(tgt_ids, encoder_output, src_padding_mask)
 
     @classmethod
@@ -147,6 +238,11 @@ class Transformer(nn.Module):
         config_dict = {k: v for k, v in self.config.__dict__.items()}
         checkpoint = {"config": config_dict, "model_state_dict": self.state_dict()}
         torch.save(checkpoint, model_path)
+        
+        # Print file size
+        file_size = os.path.getsize(model_path)
+        file_size_mb = file_size / (1024 * 1024)
+        print(f"Model saved to {model_path} (Size: {file_size_mb:.2f} MB)")
 
     def get_encoder_attention_weights(self) -> List[torch.Tensor]:
         """Get attention weights from all encoder layers.

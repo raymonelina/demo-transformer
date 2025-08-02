@@ -15,6 +15,27 @@ from .transformer import Transformer
 class LabelSmoothingLoss(nn.Module):
     """
     Label smoothing loss for sequence generation tasks.
+    
+    Label smoothing is a regularization technique that prevents the model from becoming
+    overconfident by assigning some probability mass to incorrect labels. Instead of
+    using hard targets (one-hot vectors), it uses soft targets where the correct class
+    gets probability (1-ε) and the remaining ε is distributed uniformly among other classes.
+    
+    Academic References:
+    - "Rethinking the Inception Architecture for Computer Vision" (Szegedy et al., 2016)
+      https://arxiv.org/abs/1512.00567
+    - "Attention Is All You Need" (Vaswani et al., 2017) - used label smoothing ε=0.1
+      https://arxiv.org/abs/1706.03762
+    
+    Benefits:
+    1. Prevents overconfident predictions and overfitting
+    2. Improves model calibration (predicted probabilities better reflect actual accuracy)
+    3. Acts as regularization, often improving generalization
+    4. Reduces the gap between training and validation performance
+    
+    Example:
+    Without smoothing: [0, 0, 1, 0, 0] (one-hot)
+    With smoothing ε=0.1: [0.025, 0.025, 0.9, 0.025, 0.025] (soft targets)
     """
     
     def __init__(self, smoothing: float = 0.1, vocab_size: int = 0, ignore_index: int = -100):
@@ -36,6 +57,9 @@ class LabelSmoothingLoss(nn.Module):
         """
         Forward pass of the label smoothing loss.
         
+        The loss is computed as KL divergence between the smoothed target distribution
+        and the predicted distribution: KL(q_smooth || p_pred) = -∑ q_smooth * log(p_pred)
+        
         Args:
             pred: Prediction logits [batch_size, seq_len, vocab_size]
             target: Target indices [batch_size, seq_len]
@@ -43,19 +67,24 @@ class LabelSmoothingLoss(nn.Module):
         Returns:
             Smoothed loss value
         """
+        # Convert logits to log probabilities
         pred = pred.log_softmax(dim=-1)
+        
         with torch.no_grad():
-            # Create a tensor with smoothing prob for all tokens
+            # Create smoothed target distribution
+            # All incorrect classes get uniform probability: ε/(V-1)
             true_dist = torch.zeros_like(pred)
             true_dist.fill_(self.smoothing / (self.vocab_size - 1))
             
-            # Fill in the confidence for the true tokens
+            # Correct class gets probability: (1-ε)
+            # scatter_ fills the correct positions with confidence value
             true_dist.scatter_(2, target.unsqueeze(2), self.confidence)
             
-            # Create mask for padding tokens to ignore
+            # Ignore padding tokens by setting their distribution to zero
             mask = (target == self.ignore_index).unsqueeze(-1)
             true_dist.masked_fill_(mask, 0.0)
             
+        # Compute KL divergence: -∑ q_smooth * log(p_pred)
         return torch.sum(-true_dist * pred, dim=-1).mean()
 
 
@@ -88,6 +117,8 @@ class TransformerTrainer:
         self.optimizer = optimizer or optim.Adam(model.parameters(), lr=lr)
         
         # Set up loss function
+        # Label smoothing is particularly effective for sequence generation tasks
+        # as it prevents the model from being overconfident about token predictions
         if label_smoothing > 0.0:
             self.criterion = LabelSmoothingLoss(
                 smoothing=label_smoothing,
@@ -96,6 +127,9 @@ class TransformerTrainer:
             )
         else:
             self.criterion = nn.CrossEntropyLoss(ignore_index=pad_token_id)
+            
+        # Note: For proper Transformer training, consider using the original paper's
+        # learning rate schedule with get_transformer_scheduler()
             
         self.pad_token_id = pad_token_id
         
@@ -255,21 +289,75 @@ def get_transformer_scheduler(
     factor: float = 1.0,
 ) -> torch.optim.lr_scheduler.LambdaLR:
     """
-    Get a learning rate scheduler for the Transformer as described in the original paper.
+    Get the learning rate scheduler for Transformer as described in "Attention Is All You Need".
+    
+    Academic Reference:
+    - "Attention Is All You Need" (Vaswani et al., 2017), Section 5.3
+      https://arxiv.org/abs/1706.03762
+    
+    The original paper uses this learning rate schedule:
+    lrate = d_model^(-0.5) * min(step_num^(-0.5), step_num * warmup_steps^(-1.5))
+    
+    This corresponds to:
+    1. Linear warmup phase (steps 1 to warmup_steps):
+       - LR increases linearly from 0 to peak_lr
+       - peak_lr = d_model^(-0.5) * warmup_steps^(-0.5)
+       - Formula: d_model^(-0.5) * step_num * warmup_steps^(-1.5)
+    
+    2. Decay phase (steps > warmup_steps):
+       - LR decreases proportionally to inverse square root of step number
+       - Formula: d_model^(-0.5) * step_num^(-0.5)
+    
+    Why this works:
+    - Warmup prevents instability in early training when gradients are large
+    - The 1/√step decay is gentler than exponential decay, allowing continued learning
+    - d_model^(-0.5) scaling ensures larger models use smaller learning rates
+    
+    Original paper settings:
+    - d_model = 512, warmup_steps = 4000
+    - Peak LR ≈ 0.0007 (reached at step 4000)
+    - Base optimizer: Adam with β1=0.9, β2=0.98, ε=10^(-9)
+    
+    PyTorch Implementation:
+    Uses LambdaLR scheduler which multiplies the base LR by the lambda function result.
+    Set base_lr=1.0 in optimizer, as the lambda function computes the actual LR.
     
     Args:
-        optimizer: Optimizer to schedule
-        d_model: Model dimension
-        warmup_steps: Number of warmup steps
-        factor: Scaling factor
+        optimizer: Optimizer to schedule (should have base_lr=1.0)
+        d_model: Model dimension (embed_dim)
+        warmup_steps: Number of warmup steps (original paper used 4000)
+        factor: Additional scaling factor (default 1.0)
         
     Returns:
-        Learning rate scheduler
+        PyTorch LambdaLR scheduler
+        
+    Example:
+        optimizer = torch.optim.Adam(model.parameters(), lr=1.0, betas=(0.9, 0.98), eps=1e-9)
+        scheduler = get_transformer_scheduler(optimizer, d_model=512, warmup_steps=4000)
+        
+        # In training loop:
+        optimizer.step()
+        scheduler.step()
     """
     def lr_lambda(step):
-        # Linear warmup followed by rsqrt decay
+        """
+        Compute learning rate multiplier for given step.
+        
+        Args:
+            step: Current training step (1-indexed)
+            
+        Returns:
+            Learning rate multiplier
+        """
+        # Avoid division by zero at step 0
         if step == 0:
             return 0
-        return factor * (d_model ** -0.5) * min(step ** -0.5, step * (warmup_steps ** -1.5))
+        
+        # Original Transformer LR schedule formula
+        # lrate = d_model^(-0.5) * min(step^(-0.5), step * warmup_steps^(-1.5))
+        warmup_factor = step * (warmup_steps ** -1.5)  # Linear warmup
+        decay_factor = step ** -0.5  # Inverse square root decay
+        
+        return factor * (d_model ** -0.5) * min(decay_factor, warmup_factor)
     
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
