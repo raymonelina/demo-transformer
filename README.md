@@ -6,16 +6,21 @@ A comprehensive implementation of the Transformer Encoder-Decoder architecture f
 
 - Complete Transformer implementation with encoder and decoder
 - Configuration system for easy model customization
+- Multiple attention mechanisms:
+  - Standard multi-head attention
+  - Relative positional attention
+  - Rotary Position Embedding (RoPE) attention
 - Multiple decoding strategies:
   - Greedy decoding
   - Beam search decoding
   - Sampling with temperature, top-k, and top-p (nucleus) sampling
 - Training utilities with label smoothing and learning rate scheduling
 - Data handling utilities for sequence-to-sequence tasks
-- Model saving and loading functionality
+- Model saving and loading functionality with file size reporting
 - Pre-layer normalization option for more stable training
 - Weight tying option for parameter efficiency
 - Relative positional encoding for better handling of variable-length sequences
+- Rotary Position Embedding (RoPE) for improved positional understanding
 - Gradient checkpointing for memory-efficient training of large models
 - Debug mode for printing tensor shapes and values during execution
 - Visualization tools for attention weights and embeddings
@@ -92,13 +97,43 @@ config = TransformerConfig(
     src_vocab_size=32000,
     tgt_vocab_size=32000,
     use_relative_pos=False,  # Whether to use relative positional encoding
+    use_rope=False,  # Whether to use Rotary Position Embedding
     use_gradient_checkpointing=False,  # Whether to use gradient checkpointing
     debug_mode=False,  # Whether to print debug information about tensors
     store_attention=False,  # Whether to store attention weights for visualization
+    weight_tying=True,  # Whether to tie input/output embeddings
+    pre_norm=True,  # Whether to use pre-layer normalization
 )
 
 # Initialize the model
 model = Transformer(config)
+
+# Save model with file size reporting
+model.save_pretrained("./my_model")
+```
+
+### Data Preparation
+
+```python
+from demo_transformer import TransformerDataset, create_dataloaders
+
+# Prepare tokenized data (token IDs)
+src_train = [
+    [1, 245, 678, 2],      # [SOS, "Hello", "world", EOS]
+    [1, 123, 456, 789, 2], # [SOS, "How", "are", "you?", EOS]
+]
+tgt_train = [
+    [1, 891, 234, 2],      # [SOS, "Bonjour", "monde", EOS]
+    [1, 567, 890, 123, 2], # [SOS, "Comment", "allez-vous?", EOS]
+]
+
+# Create dataloaders
+train_loader, val_loader = create_dataloaders(
+    src_train=src_train,
+    tgt_train=tgt_train,
+    batch_size=32,
+    pad_token_id=0
+)
 ```
 
 ### Training
@@ -118,9 +153,14 @@ trainer = TransformerTrainer(
     label_smoothing=0.1,
 )
 
-# Train step
-metrics = trainer.train_step(src_ids, tgt_ids, src_padding_mask)
-print(f"Loss: {metrics['loss']}")
+# Training loop
+for batch in train_loader:
+    metrics = trainer.train_step(
+        batch["src_ids"], 
+        batch["tgt_ids"], 
+        batch["src_padding_mask"]
+    )
+    print(f"Loss: {metrics['loss']}")
 ```
 
 ### Inference
@@ -145,22 +185,56 @@ sampled_output = inference.sample_decode(
 )
 ```
 
-### Running the Example
+### Running Examples
 
-You can run the example script to see a complete demonstration:
+The project includes several example scripts:
 
 ```bash
+# Basic usage demonstration
 python examples/basic_usage.py
+
+# Gradient checkpointing for memory efficiency
+python examples/gradient_checkpointing_example.py
+
+# Relative positional encoding
+python examples/relative_pos_example.py
+
+# Rotary Position Embedding (RoPE)
+python examples/rope_example.py
 ```
 
-### Debug Mode
+### Advanced Features
 
-You can enable debug mode to print tensor shapes and values during execution:
+#### Debug Mode
+
+Enable debug mode to print tensor shapes and values during execution:
 
 ```python
 config = TransformerConfig(
     # ... other parameters ...
     debug_mode=True,  # Enable debug printing
+)
+```
+
+#### Gradient Checkpointing
+
+Reduce memory usage during training of large models:
+
+```python
+config = TransformerConfig(
+    # ... other parameters ...
+    use_gradient_checkpointing=True,  # Enable gradient checkpointing
+)
+```
+
+#### Rotary Position Embedding (RoPE)
+
+Use RoPE for improved positional understanding:
+
+```python
+config = TransformerConfig(
+    # ... other parameters ...
+    use_rope=True,  # Enable RoPE
 )
 ```
 
@@ -221,11 +295,34 @@ python examples/visualization_example.py
 
 ## Components
 
+### Core Model Components
 - **Transformer**: The main model combining encoder and decoder
 - **TransformerEncoder**: The encoder part of the transformer
 - **TransformerDecoder**: The decoder part of the transformer
-- **MultiHeadAttention**: Implementation of multi-head attention mechanism
 - **TransformerConfig**: Configuration class for the transformer model
-- **TransformerTrainer**: Utilities for training the model
-- **TransformerInference**: Utilities for inference with different decoding strategies
-- **TransformerDataset**: Dataset class for transformer sequence-to-sequence tasks
+
+### Attention Mechanisms
+- **MultiHeadAttention**: Standard multi-head attention implementation
+- **RelativeMultiHeadAttention**: Attention with relative positional encoding
+- **RoPEMultiHeadAttention**: Attention with Rotary Position Embedding
+
+### Positional Encodings
+- **PositionalEncoding**: Standard sinusoidal positional encoding
+- **RelativePositionalEncoding**: Relative positional encoding
+- **RotaryPositionalEncoding**: Rotary Position Embedding (RoPE)
+
+### Training and Inference
+- **TransformerTrainer**: Training utilities with label smoothing
+- **TransformerInference**: Inference utilities with multiple decoding strategies
+- **LabelSmoothingLoss**: Label smoothing loss function
+- **get_transformer_scheduler**: Learning rate scheduler from original paper
+
+### Data Handling
+- **TransformerDataset**: Dataset class for sequence-to-sequence tasks
+- **TransformerCollator**: Batch collation with dynamic padding
+- **create_dataloaders**: Utility to create training and validation dataloaders
+
+### Utilities
+- **FeedForwardBlock**: Feed-forward network component
+- **debug_print**: Debug printing utility
+- **Visualization functions**: Tools for plotting attention weights and embeddings
