@@ -197,14 +197,34 @@ class RoPEMultiHeadAttention(nn.Module):
                 attn_scores, "attn_scores", "Attention scores before masking", "RoPEMultiHeadAttention: "
             )
         
-        # Apply mask if provided to prevent attending to certain positions
-        # The mask is typically used for two purposes:
-        # 1. Padding mask: To ignore padding tokens in variable-length sequences
-        # 2. Causal/autoregressive mask: To prevent attending to future positions in sequence generation
-        # By setting masked positions to negative infinity, they become zero after softmax
-        # This effectively removes their influence on the attention weights
+        # Apply attention mask (if provided)
+        # MASK SIZE REQUIREMENTS:
+        # - mask must have shape [batch_size, num_heads, seq_len_q, seq_len_k]
+        # - This matches attention_scores shape for element-wise masking
+        # - batch_size: number of sequences in batch
+        # - num_heads: number of attention heads (can broadcast from 1)
+        # - seq_len_q: query sequence length (rows in attention matrix)
+        # - seq_len_k: key/value sequence length (columns in attention matrix)
+        #
+        # MASK SEMANTICS:
+        # - True values: positions to MASK OUT (set to -∞, become 0 after softmax)
+        # - False values: positions to ATTEND TO (keep original scores)
+        #
+        # COMMON MASK TYPES BY TRANSFORMER COMPONENT:
+        # - Padding mask: mask out padding tokens [batch, 1, 1, seq_len]
+        #   * Used in: BOTH encoder and decoder (all attention types)
+        #   * Purpose: ignore padding tokens in variable-length sequences
+        # - Causal mask: prevent attention to future tokens [1, 1, seq_len, seq_len]
+        #   * Used in: DECODER ONLY (self-attention)
+        #   * Purpose: maintain autoregressive property during training
+        # - Combined mask: padding + causal masks element-wise OR'd together
+        #   * Used in: DECODER cross-attention (query padding + key padding)
+        #   * Purpose: handle both sequence lengths in encoder-decoder attention
+        #
+        # Mask prevents attention to certain positions by setting scores to -∞
+        # After softmax, these become 0, effectively removing their contribution
         if mask is not None:
-            attn_scores = attn_scores.masked_fill(mask == 0, float("-inf"))
+            attn_scores = attn_scores.masked_fill(mask, float("-inf"))
             
             if self.debug_mode:
                 debug_print(

@@ -168,7 +168,15 @@ class RelativeMultiHeadAttention(nn.Module):
             query: Query tensor [batch_size, seq_len_q, embed_dim]
             key: Key tensor [batch_size, seq_len_k, embed_dim]
             value: Value tensor [batch_size, seq_len_k, embed_dim]
-            mask: Attention mask [batch_size, 1, seq_len_q, seq_len_k]
+            mask: Optional attention mask [batch_size, num_heads, seq_len_q, seq_len_k]
+                 - Must match attention_scores shape for element-wise masking
+                 - True values indicate positions to MASK OUT (set to -∞)
+                 - False values indicate positions to ATTEND TO (keep scores)
+                 - Can broadcast: [batch, 1, seq_len_q, seq_len_k] or [1, 1, seq_len_q, seq_len_k]
+                 - Mask types by transformer component:
+                   * Padding mask: encoder + decoder (all attention types)
+                   * Causal mask: decoder self-attention only
+                   * Combined mask: decoder cross-attention (both sequence paddings)
 
         Returns:
             Output tensor [batch_size, seq_len_q, embed_dim]
@@ -287,7 +295,32 @@ class RelativeMultiHeadAttention(nn.Module):
                 "RelativeAttention: ",
             )
 
-        # Apply mask if provided
+        # Apply attention mask (if provided)
+        # MASK SIZE REQUIREMENTS:
+        # - mask must have shape [batch_size, num_heads, seq_len_q, seq_len_k]
+        # - This matches attention_scores shape for element-wise masking
+        # - batch_size: number of sequences in batch
+        # - num_heads: number of attention heads (can broadcast from 1)
+        # - seq_len_q: query sequence length (rows in attention matrix)
+        # - seq_len_k: key/value sequence length (columns in attention matrix)
+        #
+        # MASK SEMANTICS:
+        # - True values: positions to MASK OUT (set to -∞, become 0 after softmax)
+        # - False values: positions to ATTEND TO (keep original scores)
+        #
+        # COMMON MASK TYPES BY TRANSFORMER COMPONENT:
+        # - Padding mask: mask out padding tokens [batch, 1, 1, seq_len]
+        #   * Used in: BOTH encoder and decoder (all attention types)
+        #   * Purpose: ignore padding tokens in variable-length sequences
+        # - Causal mask: prevent attention to future tokens [1, 1, seq_len, seq_len]
+        #   * Used in: DECODER ONLY (self-attention)
+        #   * Purpose: maintain autoregressive property during training
+        # - Combined mask: padding + causal masks element-wise OR'd together
+        #   * Used in: DECODER cross-attention (query padding + key padding)
+        #   * Purpose: handle both sequence lengths in encoder-decoder attention
+        #
+        # Mask prevents attention to certain positions by setting scores to -∞
+        # After softmax, these become 0, effectively removing their contribution
         if mask is not None:
             attention_scores = attention_scores.masked_fill(mask, float("-inf"))
             if self.debug_mode:
