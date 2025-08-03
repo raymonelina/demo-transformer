@@ -94,7 +94,7 @@ class EncoderLayer(nn.Module):
 
         self.pre_norm = pre_norm
 
-    def forward(self, x: torch.Tensor, src_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, src_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         if self.debug_mode:
             debug_print(x, "layer_input", "Input to encoder layer", "EncoderLayer: ")
         """
@@ -102,7 +102,7 @@ class EncoderLayer(nn.Module):
         
         Args:
             x: Input tensor [batch_size, seq_len, embed_dim]
-            src_mask: Source mask tensor [batch_size, 1, 1, seq_len]
+            src_padding_mask: Source padding mask tensor [batch_size, 1, 1, seq_len]
             
         Returns:
             Output tensor [batch_size, seq_len, embed_dim]
@@ -111,7 +111,7 @@ class EncoderLayer(nn.Module):
             # Pre-layer normalization: x + Sublayer(LayerNorm(x))
             # Better gradient flow, enables deeper models (Wang et al., 2019)
             norm_x = self.norm1(x)
-            self_attn_output = self.self_attn(norm_x, norm_x, norm_x, mask=src_mask)
+            self_attn_output = self.self_attn(norm_x, norm_x, norm_x, mask=src_padding_mask)
             x = x + self.dropout1(self_attn_output)
 
             norm_x = self.norm2(x)
@@ -120,7 +120,7 @@ class EncoderLayer(nn.Module):
         else:
             # Post-layer normalization: LayerNorm(x + Sublayer(x))
             # Original Transformer architecture (Vaswani et al., 2017)
-            self_attn_output = self.self_attn(x, x, x, mask=src_mask)
+            self_attn_output = self.self_attn(x, x, x, mask=src_padding_mask)
             x = self.norm1(x + self.dropout1(self_attn_output))
 
             ff_output = self.feed_forward(x)
