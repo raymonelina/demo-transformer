@@ -122,8 +122,8 @@ class DecoderLayer(nn.Module):
         Args:
             target_input: Target input tensor [batch_size, tgt_seq_len, embed_dim]
             encoder_output: Encoder output tensor [batch_size, src_seq_len, embed_dim]
-            tgt_mask: Target mask tensor [batch_size, 1, tgt_seq_len, tgt_seq_len]
-            src_mask: Source mask tensor [batch_size, 1, 1, src_seq_len]
+            tgt_mask: Target mask tensor [batch_size, num_heads, tgt_seq_len, tgt_seq_len] or broadcastable
+            src_mask: Source mask tensor [batch_size, num_heads, tgt_seq_len, src_seq_len] or broadcastable
             
         Returns:
             Output tensor [batch_size, tgt_seq_len, embed_dim]
@@ -276,8 +276,8 @@ class TransformerDecoder(nn.Module):
         Args:
             target_ids: Target token IDs [batch_size, tgt_seq_len]
             encoder_output: Encoder output tensor [batch_size, src_seq_len, embed_dim]
-            src_padding_mask: Source padding mask [batch_size, 1, 1, src_seq_len]
-            tgt_padding_mask: Target padding mask [batch_size, 1, tgt_seq_len, tgt_seq_len]
+            src_padding_mask: Source padding mask [batch_size, num_heads, tgt_seq_len, src_seq_len] or broadcastable
+            tgt_padding_mask: Target padding mask [batch_size, num_heads, tgt_seq_len, tgt_seq_len] or broadcastable
 
         Returns:
             Decoder logits [batch_size, tgt_seq_len, vocab_size]
