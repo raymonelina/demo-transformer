@@ -93,8 +93,9 @@ def test_rope_multi_head_attention_with_mask():
     k = torch.randn(batch_size, seq_len, embed_dim)
     v = torch.randn(batch_size, seq_len, embed_dim)
     
-    # Create a causal mask (lower triangular)
-    mask = torch.tril(torch.ones(batch_size, 1, seq_len, seq_len))
+    # Create a causal mask (lower triangular) - boolean mask
+    mask = torch.tril(torch.ones(batch_size, 1, seq_len, seq_len, dtype=torch.bool))
+    mask = ~mask  # Invert: True = mask out, False = attend to
     
     output = attention(q, k, v, mask)
     
