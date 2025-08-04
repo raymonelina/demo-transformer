@@ -86,8 +86,6 @@ def test_transformer_relative_attention():
     assert not torch.isinf(output).any(), "Output contains infinite values"
 
 
-# Skip the RoPE test for now as it's causing NaN issues in the decoder
-@pytest.mark.skip(reason="RoPE attention currently produces NaN values in the decoder")
 def test_transformer_rope_attention():
     """Test the Transformer with RoPE attention."""
     print("\n\nRunning test_transformer_rope_attention\n")

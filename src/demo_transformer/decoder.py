@@ -101,7 +101,7 @@ class DecoderLayer(nn.Module):
         target_input: torch.Tensor,
         encoder_output: torch.Tensor,
         tgt_mask: Optional[torch.Tensor] = None,
-        src_mask: Optional[torch.Tensor] = None,
+        src_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         if self.debug_mode:
             debug_print(
@@ -123,7 +123,7 @@ class DecoderLayer(nn.Module):
             target_input: Target input tensor [batch_size, tgt_seq_len, embed_dim]
             encoder_output: Encoder output tensor [batch_size, src_seq_len, embed_dim]
             tgt_mask: Target mask tensor [batch_size, num_heads, tgt_seq_len, tgt_seq_len] or broadcastable
-            src_mask: Source mask tensor [batch_size, num_heads, tgt_seq_len, src_seq_len] or broadcastable
+            src_padding_mask: Source padding mask tensor [batch_size, num_heads, tgt_seq_len, src_seq_len] or broadcastable
             
         Returns:
             Output tensor [batch_size, tgt_seq_len, embed_dim]
@@ -136,7 +136,7 @@ class DecoderLayer(nn.Module):
 
             norm_x = self.norm2(x)
             cross_attn_output = self.cross_attn(
-                norm_x, encoder_output, encoder_output, mask=src_mask
+                norm_x, encoder_output, encoder_output, mask=src_padding_mask
             )
             x = x + self.dropout2(cross_attn_output)
 
@@ -150,7 +150,7 @@ class DecoderLayer(nn.Module):
             )
             x = self.norm1(target_input + self.dropout1(self_attn_output))
 
-            cross_attn_output = self.cross_attn(x, encoder_output, encoder_output, mask=src_mask)
+            cross_attn_output = self.cross_attn(x, encoder_output, encoder_output, mask=src_padding_mask)
             x = self.norm2(x + self.dropout2(cross_attn_output))
 
             ff_output = self.feed_forward(x)
@@ -258,10 +258,10 @@ class TransformerDecoder(nn.Module):
         x: torch.Tensor,
         encoder_output: torch.Tensor,
         tgt_mask: torch.Tensor,
-        src_mask: Optional[torch.Tensor],
+        src_padding_mask: Optional[torch.Tensor],
     ) -> torch.Tensor:
         """Helper function for gradient checkpointing."""
-        return layer(x, encoder_output, tgt_mask=tgt_mask, src_mask=src_mask)
+        return layer(x, encoder_output, tgt_mask=tgt_mask, src_padding_mask=src_padding_mask)
 
     def forward(
         self,
@@ -333,7 +333,7 @@ class TransformerDecoder(nn.Module):
                     self._layer_forward, layer, x, encoder_output, tgt_mask, src_padding_mask, use_reentrant=False
                 )
             else:
-                x = layer(x, encoder_output, tgt_mask=tgt_mask, src_mask=src_padding_mask)
+                x = layer(x, encoder_output, tgt_mask=tgt_mask, src_padding_mask=src_padding_mask)
 
             if self.debug_mode:
                 debug_print(
