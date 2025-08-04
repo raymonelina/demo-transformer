@@ -156,9 +156,42 @@ class TransformerTrainer:
         
         Args:
             src_ids: Source token IDs [batch_size, src_seq_len]
-            tgt_ids: Target token IDs [batch_size, tgt_seq_len]
+                Raw source tokens without SOS/EOS (encoder input)
+            tgt_ids: Complete target sequence [batch_size, tgt_seq_len] 
+                Full target sequence with SOS at start and EOS at end
             src_padding_mask: Source padding mask [batch_size, 1, 1, src_seq_len]
+                Boolean mask where True indicates padding positions to ignore
             tgt_padding_mask: Target padding mask [batch_size, 1, tgt_seq_len, tgt_seq_len]
+                2D boolean mask for target self-attention (masks padding in both dimensions)
+        
+        Example:
+            # English-French translation batch
+            src_ids = [
+                [4, 15, 23],      # "I love cats" (no SOS/EOS)
+                [8, 12, 0]        # "Hello world" + padding
+            ]
+            tgt_ids = [
+                [1, 7, 19, 25, 2],  # [SOS, "J'aime", "les", "chats", EOS]
+                [1, 11, 16, 2, 0]   # [SOS, "Bonjour", "monde", EOS] + padding
+            ]
+            src_padding_mask = [
+                [[[False, False, False]]],  # No padding in first sequence
+                [[[False, False, True]]]    # Third position is padding
+            ]
+            tgt_padding_mask = [
+                # 5x5 matrix - no padding positions
+                [[[False, False, False, False, False],
+                  [False, False, False, False, False],
+                  [False, False, False, False, False],
+                  [False, False, False, False, False],
+                  [False, False, False, False, False]]],
+                # 5x5 matrix - last position is padding
+                [[[False, False, False, False, True],
+                  [False, False, False, False, True],
+                  [False, False, False, False, True],
+                  [False, False, False, False, True],
+                  [True,  True,  True,  True,  True]]]
+            ]
             
         Returns:
             Dictionary with loss and other metrics
@@ -174,9 +207,9 @@ class TransformerTrainer:
         if tgt_padding_mask is not None:
             tgt_padding_mask = tgt_padding_mask.to(self.device)
         
-        # Teacher forcing: use target tokens as input, but predict next token
-        input_tgt_ids = tgt_ids[:, :-1]  # Remove last token
-        target_tgt_ids = tgt_ids[:, 1:]  # Remove first token (usually SOS)
+        # Teacher forcing: split complete target sequence into input/target
+        input_tgt_ids = tgt_ids[:, :-1]  # Decoder input: [SOS, "J'aime", "les", "chats"]
+        target_tgt_ids = tgt_ids[:, 1:]  # Decoder target: ["J'aime", "les", "chats", EOS]
         
         # Adjust target padding mask for input sequence (remove last position)
         input_tgt_padding_mask = None

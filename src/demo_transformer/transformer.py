@@ -302,6 +302,14 @@ class Transformer(nn.Module):
         Returns:
             Decoder logits [batch_size, tgt_seq_len, tgt_vocab_size]
         """
+        # 📊 TENSOR DIMENSIONS THROUGHOUT FORWARD PASS
+        # ============================================
+        # Input tensors:
+        #   src_ids: [batch_size, src_seq_len] - Source token IDs (e.g., [2, 5] for batch=2, src_len=5)
+        #   tgt_ids: [batch_size, tgt_seq_len] - Target token IDs (e.g., [2, 7] for batch=2, tgt_len=7)
+        #   src_padding_mask: [batch_size, 1, 1, src_seq_len] - Source mask (e.g., [2, 1, 1, 5])
+        #   tgt_padding_mask: [batch_size, 1, tgt_seq_len, tgt_seq_len] - Target mask (e.g., [2, 1, 7, 7])
+        
         if hasattr(self.config, "debug_mode") and self.config.debug_mode:
             debug_print(src_ids, "src_ids", "Source token IDs", "Transformer: ")
             debug_print(tgt_ids, "tgt_ids", "Target token IDs", "Transformer: ")
@@ -314,16 +322,27 @@ class Transformer(nn.Module):
                     tgt_padding_mask, "tgt_padding_mask", "Target padding mask", "Transformer: "
                 )
 
+        # 🔄 ENCODER PASS: src_ids → encoder_output
+        # Input:  src_ids [batch_size, src_seq_len]
+        # Output: encoder_output [batch_size, src_seq_len, embed_dim]
+        # Example: [2, 5] → [2, 5, 512] (each source token becomes a 512-dim vector)
         encoder_output = self.encoder(src_ids, src_padding_mask)
 
         if hasattr(self.config, "debug_mode") and self.config.debug_mode:
             debug_print(encoder_output, "encoder_output", "Encoder output tensor", "Transformer: ")
 
+        # 🔄 DECODER PASS: tgt_ids + encoder_output → decoder_logits
+        # Input:  tgt_ids [batch_size, tgt_seq_len], encoder_output [batch_size, src_seq_len, embed_dim]
+        # Output: decoder_logits [batch_size, tgt_seq_len, tgt_vocab_size]
+        # Example: [2, 7] + [2, 5, 512] → [2, 7, 32000] (each target position gets vocab-sized logits)
         decoder_logits = self.decoder(tgt_ids, encoder_output, src_padding_mask, tgt_padding_mask)
 
         if hasattr(self.config, "debug_mode") and self.config.debug_mode:
             debug_print(decoder_logits, "decoder_logits", "Decoder output logits", "Transformer: ")
 
+        # 📤 FINAL OUTPUT: decoder_logits [batch_size, tgt_seq_len, tgt_vocab_size]
+        # Each position in target sequence gets a probability distribution over vocabulary
+        # Example: [2, 7, 32000] means 2 sequences, 7 positions each, 32000 possible tokens per position
         return decoder_logits
 
     def encode(
