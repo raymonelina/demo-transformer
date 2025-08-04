@@ -81,7 +81,7 @@ def main():
     source_seq_len = max(src_lengths)
     target_seq_len = max(tgt_lengths)
 
-    # Create source sequences and masks
+    # Create source sequences and masks (NO SOS/EOS for encoder!)
     dummy_src_ids = torch.randint(1, config.src_vocab_size, (batch_size, source_seq_len)).to(device)
     dummy_src_padding_mask = torch.zeros(batch_size, 1, 1, source_seq_len, dtype=torch.bool).to(
         device
@@ -91,7 +91,7 @@ def main():
         dummy_src_ids[i, length:] = config.pad_token_id  # Add padding
         dummy_src_padding_mask[i, :, :, length:] = True  # Mask padding
 
-    # Create target sequences and masks
+    # Create target sequences and masks (WITH SOS/EOS for decoder!)
     dummy_tgt_ids = torch.randint(1, config.tgt_vocab_size, (batch_size, target_seq_len)).to(device)
     dummy_tgt_ids[:, 0] = config.sos_token_id  # Start with SOS token
     dummy_tgt_padding_mask = torch.zeros(

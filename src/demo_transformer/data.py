@@ -35,13 +35,17 @@ class TransformerDataset(Dataset):
     
     # After tokenization and numericalization
     src_ids = [
-        [1, 245, 678, 2],      # [SOS, "Hello", "world", EOS]
-        [1, 123, 456, 789, 2]  # [SOS, "How", "are", "you?", EOS]
+        [245, 678],      # ["Hello", "world"] - NO SOS/EOS for encoder!
+        [123, 456, 789]  # ["How", "are", "you?"] - NO SOS/EOS for encoder!
     ]
+    # Complete target sequences (will be split into input/target during training)
     tgt_ids = [
         [1, 891, 234, 2],         # [SOS, "Bonjour", "monde", EOS]
         [1, 567, 890, 123, 2]     # [SOS, "Comment", "allez-vous?", EOS]
     ]
+    # During training, this gets split into:
+    # Decoder input = tgt_ids[:, :-1]  → [1, 891, 234] = [SOS, "Bonjour", "monde"]
+    # Decoder target = tgt_ids[:, 1:]  → [891, 234, 2] = ["Bonjour", "monde", EOS]
     
     dataset = TransformerDataset(src_ids, tgt_ids, pad_token_id=0)
     ```
@@ -50,8 +54,8 @@ class TransformerDataset(Dataset):
     ```python
     # For inference, you only need source sequences
     src_ids = [
-        [1, 245, 678, 2],      # [SOS, "Hello", "world", EOS]
-        [1, 999, 888, 777, 2]  # [SOS, "Good", "morning", "sir", EOS]
+        [245, 678],      # ["Hello", "world"] - NO SOS/EOS for encoder!
+        [999, 888, 777]  # ["Good", "morning", "sir"] - NO SOS/EOS for encoder!
     ]
     # Targets not needed for inference, but dataset requires them
     # Use dummy targets or just SOS tokens
@@ -121,15 +125,15 @@ class TransformerCollator:
     ```python
     # Input batch (variable lengths)
     batch = [
-        {"src_ids": [1, 245, 678, 2], "tgt_ids": [1, 891, 234, 2]},
-        {"src_ids": [1, 123, 456, 789, 999, 2], "tgt_ids": [1, 567, 890, 2]}
+        {"src_ids": [245, 678], "tgt_ids": [1, 891, 234, 2]},
+        {"src_ids": [123, 456, 789, 999], "tgt_ids": [1, 567, 890, 2]}
     ]
     
     # After collation (padded to max lengths)
     output = {
         "src_ids": tensor([
-            [1, 245, 678, 2, 0, 0],      # Padded with 2 zeros
-            [1, 123, 456, 789, 999, 2]   # No padding needed
+            [245, 678, 0, 0],      # Padded with 2 zeros
+            [123, 456, 789, 999]   # No padding needed
         ]),
         "tgt_ids": tensor([
             [1, 891, 234, 2],  # No padding needed
@@ -243,9 +247,9 @@ def create_dataloaders(
     ```python
     # 1. Prepare tokenized data
     src_train = [
-        [1, 245, 678, 2],      # "Hello world"
-        [1, 123, 456, 789, 2], # "How are you?"
-        [1, 999, 888, 2]       # "Good morning"
+        [245, 678],      # "Hello world" - NO SOS/EOS for encoder!
+        [123, 456, 789], # "How are you?" - NO SOS/EOS for encoder!
+        [999, 888]       # "Good morning" - NO SOS/EOS for encoder!
     ]
     tgt_train = [
         [1, 891, 234, 2],      # "Bonjour monde"
@@ -268,15 +272,23 @@ def create_dataloaders(
         src_mask = batch["src_padding_mask"]     # [batch_size, 1, 1, max_src_len]
         tgt_mask = batch["tgt_padding_mask"]     # [batch_size, 1, max_tgt_len, max_tgt_len]
         
-        # Forward pass with both masks
-        logits = model(src_ids, tgt_ids[:, :-1], src_mask, tgt_mask[:, :, :-1, :-1])
-        loss = criterion(logits.view(-1, vocab_size), tgt_ids[:, 1:].reshape(-1))
+        # Split tgt_ids into decoder input and target
+        decoder_input = tgt_ids[:, :-1]    # [SOS, "J'aime", "les", "chats"]
+        decoder_target = tgt_ids[:, 1:]    # ["J'aime", "les", "chats", EOS]
+        
+        # Forward pass with decoder input (not full tgt_ids!)
+        # Note: tgt_mask needs to match decoder_input size, not decoder_target
+        decoder_mask = tgt_mask[:, :, :-1, :-1]  # Remove last row/col to match decoder_input
+        logits = model(src_ids, decoder_input, src_mask, decoder_mask)
+        loss = criterion(logits.view(-1, vocab_size), decoder_target.reshape(-1))
     ```
     
     Data Preparation Guidelines:
     1. Tokenize text: "Hello world" → ["Hello", "world"]
     2. Convert to IDs: ["Hello", "world"] → [245, 678]
-    3. Add special tokens: [245, 678] → [1, 245, 678, 2] (SOS + tokens + EOS)
+    3. Add special tokens:
+       - Source (encoder): [245, 678] → [245, 678] (NO SOS/EOS!)
+       - Target (decoder): [891, 234] → [1, 891, 234, 2] (SOS + tokens + EOS)
     4. For demo purposes, random token IDs can be used: torch.randint(1, vocab_size, (seq_len,))
     5. Ensure consistent vocabulary between source and target (or separate vocabs)
     
