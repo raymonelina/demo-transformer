@@ -72,9 +72,46 @@ class Transformer(nn.Module):
             store_attention=self.store_attention,
         )
 
-        # Implement weight tying if configured
+        # ═══════════════════════════════════════════════════════════════════════════════
+        # 🔗 WEIGHT TYING: Share Input/Output Embeddings (Parameter Efficiency)
+        # ═══════════════════════════════════════════════════════════════════════════════
+        # 
+        # WHAT: Input embedding and output projection layers share the same weight matrix
+        # WHY: Reduces parameters by ~50% and often improves performance
+        # 
+        # ACADEMIC PAPERS:
+        # • "Using the Output Embedding to Improve Language Models" (Press & Wolf, 2017)
+        # • "Attention Is All You Need" (Vaswani et al., 2017) - mentions weight tying
+        # • "Tying Word Vectors and Word Classifiers" (Inan et al., 2017)
+        # 
+        # HOW IT WORKS:
+        # Normal case (separate matrices):
+        #   input_embedding:    [vocab_size, embed_dim]  - maps token_id → vector
+        #   output_projection:  [embed_dim, vocab_size]  - maps vector → logits
+        #   Total params: vocab_size × embed_dim × 2
+        # 
+        # Weight tying (shared matrix):
+        #   Both layers use the SAME matrix (transposed for output)
+        #   Total params: vocab_size × embed_dim × 1  (50% reduction!)
+        # 
+        # INTUITION:
+        # If word "cat" has embedding [0.1, 0.5, -0.2], then when predicting "cat",
+        # the model should output high logit for "cat". Weight tying enforces this
+        # symmetry: similar words have similar embeddings AND similar output weights.
+        # 
+        # REQUIREMENTS:
+        # • Source and target vocabularies must be the same size
+        # • Only works for encoder-decoder with shared vocabulary (e.g., same language)
+        # 
         if config.weight_tying and config.src_vocab_size == config.tgt_vocab_size:
+            # Share the weight matrix between input embedding and output projection
+            # decoder.token_embedding.weight: [tgt_vocab_size, embed_dim]
+            # decoder.output_projection.weight: [tgt_vocab_size, embed_dim] (will be transposed in forward)
             self.decoder.output_projection.weight = self.decoder.token_embedding.weight
+            
+            # Note: PyTorch Linear layer automatically transposes weight matrix during forward pass:
+            # output = input @ weight.T + bias
+            # So embedding weight [vocab_size, embed_dim] becomes [embed_dim, vocab_size] for projection
 
     def forward(
         self,
@@ -86,56 +123,172 @@ class Transformer(nn.Module):
         """
         Forward pass of the transformer model - USED FOR TRAINING with teacher forcing.
         
-        TEACHER FORCING explained:
+        ═══════════════════════════════════════════════════════════════════════════════
+        🎯 MASKS vs SPECIAL TOKENS: Why We Need Both
+        ═══════════════════════════════════════════════════════════════════════════════
+        
+        MASKS handle STRUCTURAL constraints:
+        • Padding masks: "Ignore these positions (they're padding tokens)"
+        • Causal masks: "Don't look at future positions (prevent cheating)"
+        
+        SPECIAL TOKENS provide SEMANTIC meaning:
+        • SOS: "Start generating here" (provides initial context)
+        • EOS: "Stop generating here" (signals end of sequence)
+        • PAD: "This position is meaningless" (just filler for batching)
+        
+        🔑 KEY INSIGHT: SOS and EOS are REAL tokens that must be visible!
+        Masks only hide PAD tokens and future positions, never SOS/EOS.
+        
+        Example sequence: [SOS, "J'aime", "les", "chats", EOS, PAD, PAD]
+        Token IDs:        [  1,      4,     5,      6,    2,   0,   0]
+        
+        PADDING MASK (what to ignore):
+        [False, False, False, False, False, True, True]
+         SOS✓   word✓  word✓  word✓  EOS✓   PAD✗  PAD✗
+        
+        CAUSAL MASK (prevent looking ahead - lower triangular):
+        Position 0: Can see [SOS] only
+        Position 1: Can see [SOS, "J'aime"] only
+        Position 2: Can see [SOS, "J'aime", "les"] only
+        Position 3: Can see [SOS, "J'aime", "les", "chats"] only
+        Position 4: Can see [SOS, "J'aime", "les", "chats", EOS] only
+        
+        ═══════════════════════════════════════════════════════════════════════════════
+        🎓 TEACHER FORCING Explained
+        ═══════════════════════════════════════════════════════════════════════════════
+        
         During training, we feed the correct target sequence as input, rather than using
         the model's own predictions. This allows parallel processing of all positions.
         
         Example - Training to translate "I love cats" → "J'aime les chats":
         
-        ENCODER:
-        - Input (src_ids):  ["I", "love", "cats"]     # English source
+        ENCODER (Understanding the source):
+        - Input (src_ids):  ["I", "love", "cats"]     # English source (NO SOS/EOS needed!)
         - Output: encoder_output                      # Understanding of English meaning
+        - Why no SOS/EOS: Encoder just needs to understand meaning, not generate
         
-        DECODER (with teacher forcing):
-        - Input (tgt_ids):  [SOS, "J'aime", "les", "chats"]  # Correct French as input
-        - Uses: encoder_output + tgt_ids                     # English meaning + French context
-        - Target output: ["J'aime", "les", "chats", EOS]     # What we want to predict
+        DECODER (Generating the target):
+        Complete sequence: [SOS, "J'aime", "les", "chats", EOS]  # Full target sequence
+        - Input (tgt_ids):  [SOS, "J'aime", "les", "chats"]     # Decoder input (all except last)
+        - Target labels:    ["J'aime", "les", "chats", EOS]     # What we want to predict (all except first)
+        - Uses: encoder_output + tgt_ids                        # English meaning + French context
+        - Why SOS/EOS: Decoder needs to know when to start (SOS) and stop (EOS) generating
         
-        KEY DIFFERENCE - Where do the French words come from?
+        🔑 KEY: Input is target "shifted right" - we predict the NEXT token at each position
         
-        TRAINING (Teacher Forcing - PARALLEL):
-        - We GIVE the model the correct French: [SOS, "J'aime", "les", "chats"]
-        - Model processes ALL positions at once:
-          Position 0: English + SOS → predict "J'aime" (we know answer is "J'aime")
-          Position 1: English + [SOS, "J'aime"] → predict "les" (we know answer is "les")
-          Position 2: English + [SOS, "J'aime", "les"] → predict "chats" (we know answer is "chats")
-          Position 3: English + [SOS, "J'aime", "les", "chats"] → predict EOS (we know answer is EOS)
+        📝 NOTE: Some tasks DO add special tokens to encoder input:
+        - Classification: [CLS] + tokens + [SEP] (BERT-style)
+        - But for translation: just raw source tokens work fine
         
-        INFERENCE (No Teacher Forcing - SEQUENTIAL):
-        - Model must GENERATE its own French words step by step:
-          Step 1: English + [SOS] → predict "J'aime" (model's guess)
-          Step 2: English + [SOS, "J'aime"] → predict "les" (using its own "J'aime")
-          Step 3: English + [SOS, "J'aime", "les"] → predict "chats" (using its own words)
-          Step 4: English + [SOS, "J'aime", "les", "chats"] → predict EOS (using its own words)
+        ═══════════════════════════════════════════════════════════════════════════════
+        📋 SUMMARY: Each Training Sample Contains 3 Components
+        ═══════════════════════════════════════════════════════════════════════════════
         
-        Training: Uses CORRECT French words (fast, parallel)
-        Inference: Uses MODEL'S OWN French words (slow, sequential, can make mistakes)
+        For EVERY training example, we need these 3 pieces:
         
-        MASKING'S ROLE in Teacher Forcing:
-        Even though we give the model ALL French words [SOS, "J'aime", "les", "chats"],
+        1️⃣ ENCODER INPUT:  ["I", "love", "cats"]                    # Source sentence
+        2️⃣ DECODER INPUT:  [SOS, "J'aime", "les", "chats"]          # Target shifted right
+        3️⃣ DECODER TARGET: ["J'aime", "les", "chats", EOS]          # What to predict
+        
+        The decoder input and target are the SAME sequence, just shifted by one position!
+        This is the essence of teacher forcing - we give the model the correct previous
+        tokens and ask it to predict the next token.
+        
+        ═══════════════════════════════════════════════════════════════════════════════
+        🚀 INFERENCE: How the Model Actually Generates Text
+        ═══════════════════════════════════════════════════════════════════════════════
+        
+        🔄 AUTOREGRESSIVE LOOP: Model generates one token at a time, using its own predictions
+        
+        🏗️ SETUP PHASE (Done Once):
+        - Encoder input: ["I", "love", "cats"] → encoder_output [batch, 3, embed_dim]
+        - This encoder_output contains the "meaning" of the English sentence
+        - It's computed ONCE and reused for ALL decoding steps (efficiency!)
+        
+        🔄 GENERATION LOOP (Repeated Until EOS):
+        
+        Step 1: Generate first word
+        - Decoder input: [SOS]
+        - Cross-attention: Decoder queries encoder_output to understand English meaning
+        - Model thinks: "Given English 'I love cats', what's the first French word?"
+        - Model predicts: "J'aime" (logits → argmax/sampling)
+        - Current sequence: [SOS, "J'aime"]
+        
+        Step 2: Generate second word  
+        - Decoder input: [SOS, "J'aime"] (using model's own "J'aime"!)
+        - Self-attention: Decoder looks at its own [SOS, "J'aime"] for French context
+        - Cross-attention: Decoder queries encoder_output to understand English meaning
+        - Model thinks: "Given English 'I love cats' + French 'J'aime', what's next?"
+        - Model predicts: "les" (based on English meaning + French context)
+        - Current sequence: [SOS, "J'aime", "les"]
+        
+        Step 3: Generate third word
+        - Decoder input: [SOS, "J'aime", "les"] (using model's own words!)
+        - Self-attention: Decoder looks at its own [SOS, "J'aime", "les"] for French context
+        - Cross-attention: Decoder queries encoder_output to understand English meaning
+        - Model thinks: "Given English 'I love cats' + French 'J'aime les', what's next?"
+        - Model predicts: "chats" (based on English meaning + French context)
+        - Current sequence: [SOS, "J'aime", "les", "chats"]
+        
+        Step 4: Generate stop signal
+        - Decoder input: [SOS, "J'aime", "les", "chats"] (using model's own words!)
+        - Self-attention: Decoder looks at its own complete French sequence
+        - Cross-attention: Decoder queries encoder_output to check if translation is complete
+        - Model thinks: "Given English 'I love cats' + French 'J'aime les chats', am I done?"
+        - Model predicts: EOS (decides translation is complete)
+        - Final output: "J'aime les chats" (remove SOS/EOS for user)
+        
+        🔑 KEY INSIGHT: Encoder Output is the "Memory" of Source Meaning
+        - encoder_output = ALL source tokens encoded as vectors [batch, src_len, embed_dim]
+        - At EVERY step, decoder sees ALL encoder outputs via cross-attention
+        - Cross-attention computes weighted sum of ALL encoder outputs
+        - Attention weights determine how much each source position contributes
+        
+        🧠 HOW CROSS-ATTENTION WORKS:
+        - Decoder position creates Query vector from current French context
+        - ALL encoder positions provide Key and Value vectors
+        - Attention scores = Query · Keys (how relevant each English position is)
+        - Final output = weighted sum of ALL Values (blended English information)
+        - Result: Each French token gets information from ALL English tokens
+        
+        🚨 KEY DIFFERENCES from Training:
+        - SEQUENTIAL: One token at a time (slow)
+        - AUTOREGRESSIVE: Uses its own predictions (can compound errors)
+        - NO TEACHER: No correct answers provided
+        - EXPOSURE BIAS: Trained on correct tokens, but uses its own at inference
+        - ENCODER REUSE: Same encoder_output used for all steps (efficient!)
+        
+        Training: Uses CORRECT French words (fast, parallel, stable)
+        Inference: Uses MODEL'S OWN French words (slow, sequential, error-prone)
+        
+        ═══════════════════════════════════════════════════════════════════════════════
+        🛡️ MASKING'S ROLE in Teacher Forcing
+        ═══════════════════════════════════════════════════════════════════════════════
+        
+        Even though we give the model the decoder input [SOS, "J'aime", "les", "chats"],
         masking prevents cheating by blocking future tokens:
         
         Position 0 (predicting "J'aime"):
-        - Can see: [SOS] ✓
+        - Can see: [SOS] ✓ (SOS provides "start French" context)
         - MASKED: ["J'aime", "les", "chats"] ✗ (blocked by causal mask)
         
         Position 1 (predicting "les"):
-        - Can see: [SOS, "J'aime"] ✓
+        - Can see: [SOS, "J'aime"] ✓ (SOS + previous word context)
         - MASKED: ["les", "chats"] ✗ (blocked by causal mask)
         
         Position 2 (predicting "chats"):
-        - Can see: [SOS, "J'aime", "les"] ✓
+        - Can see: [SOS, "J'aime", "les"] ✓ (SOS + previous words context)
         - MASKED: ["chats"] ✗ (blocked by causal mask)
+        
+        Position 3 (predicting EOS):
+        - Can see: [SOS, "J'aime", "les", "chats"] ✓ (full context to decide "stop here")
+        - Target: EOS (not in input, but what we want to predict)
+        
+        🚨 CRITICAL: SOS and EOS are NEVER masked by padding masks!
+        - SOS provides essential starting context ("begin French generation")
+        - EOS must be predicted to learn when to stop
+        - Only PAD tokens get masked by padding masks
+        - Only future positions get masked by causal masks
         
         Without masking, the model would cheat by looking at future answers!
         Teacher forcing makes training faster (parallel) and more stable (uses correct tokens).
