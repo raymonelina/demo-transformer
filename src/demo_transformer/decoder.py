@@ -46,7 +46,7 @@ class DecoderLayer(nn.Module):
         super().__init__()
         self.debug_mode = debug_mode
         self.store_attention = store_attention
-        
+
         # Choose the appropriate attention mechanism based on parameters
         if use_relative_pos:
             self.self_attn = RelativeMultiHeadAttention(
@@ -103,6 +103,18 @@ class DecoderLayer(nn.Module):
         tgt_mask: Optional[torch.Tensor] = None,
         src_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        """
+        Forward pass of the decoder layer.
+        
+        Args:
+            target_input: Target input tensor [batch_size, tgt_seq_len, embed_dim]
+            encoder_output: Encoder output tensor [batch_size, src_seq_len, embed_dim]
+            tgt_mask: Target mask tensor [batch_size, 1, tgt_seq_len, tgt_seq_len] or broadcastable
+            src_padding_mask: Source padding mask tensor [batch_size, 1, 1, src_seq_len] or broadcastable
+            
+        Returns:
+            Output tensor [batch_size, tgt_seq_len, embed_dim]
+        """
         if self.debug_mode:
             debug_print(
                 target_input,
@@ -116,18 +128,6 @@ class DecoderLayer(nn.Module):
                 "Encoder output to decoder layer",
                 "DecoderLayer: ",
             )
-        """
-        Forward pass of the decoder layer.
-        
-        Args:
-            target_input: Target input tensor [batch_size, tgt_seq_len, embed_dim]
-            encoder_output: Encoder output tensor [batch_size, src_seq_len, embed_dim]
-            tgt_mask: Target mask tensor [batch_size, num_heads, tgt_seq_len, tgt_seq_len] or broadcastable
-            src_padding_mask: Source padding mask tensor [batch_size, num_heads, tgt_seq_len, src_seq_len] or broadcastable
-            
-        Returns:
-            Output tensor [batch_size, tgt_seq_len, embed_dim]
-        """
         if self.pre_norm:
             # Pre-layer normalization
             norm_tgt = self.norm1(target_input)
@@ -150,7 +150,9 @@ class DecoderLayer(nn.Module):
             )
             x = self.norm1(target_input + self.dropout1(self_attn_output))
 
-            cross_attn_output = self.cross_attn(x, encoder_output, encoder_output, mask=src_padding_mask)
+            cross_attn_output = self.cross_attn(
+                x, encoder_output, encoder_output, mask=src_padding_mask
+            )
             x = self.norm2(x + self.dropout2(cross_attn_output))
 
             ff_output = self.feed_forward(x)
@@ -198,7 +200,7 @@ class TransformerDecoder(nn.Module):
         self.vocab_size = vocab_size
 
         self.token_embedding = nn.Embedding(vocab_size, embed_dim)
-        
+
         # Choose the appropriate positional encoding based on parameters
         if use_rope:
             # For RoPE, we still create a positional encoding object for API compatibility,
@@ -206,7 +208,7 @@ class TransformerDecoder(nn.Module):
             self.positional_encoding = RotaryPositionalEncoding(embed_dim, max_seq_len)
         else:
             self.positional_encoding = PositionalEncoding(embed_dim, max_seq_len)
-            
+
         self.decoder_layers = nn.ModuleList(
             [
                 DecoderLayer(
@@ -276,8 +278,8 @@ class TransformerDecoder(nn.Module):
         Args:
             target_ids: Target token IDs [batch_size, tgt_seq_len]
             encoder_output: Encoder output tensor [batch_size, src_seq_len, embed_dim]
-            src_padding_mask: Source padding mask [batch_size, num_heads, tgt_seq_len, src_seq_len] or broadcastable
-            tgt_padding_mask: Target padding mask [batch_size, num_heads, tgt_seq_len, tgt_seq_len] or broadcastable
+            src_padding_mask: Source padding mask [batch_size, 1, 1, src_seq_len] or broadcastable
+            tgt_padding_mask: Target padding mask [batch_size, 1, tgt_seq_len, tgt_seq_len] or broadcastable
 
         Returns:
             Decoder logits [batch_size, tgt_seq_len, vocab_size]
@@ -297,12 +299,34 @@ class TransformerDecoder(nn.Module):
         target_seq_len = target_ids.size(1)
 
         # Generate causal mask to prevent attending to future positions
+        # causal_mask: [1, 1, tgt_seq_len, tgt_seq_len] - TRIANGULAR shape
+        # Example for seq_len=5 (0=can attend, 1=masked):
+        # [[0, 1, 1, 1, 1],   # pos 0 can only see itself
+        #  [0, 0, 1, 1, 1],   # pos 1 can see pos 0,1
+        #  [0, 0, 0, 1, 1],   # pos 2 can see pos 0,1,2
+        #  [0, 0, 0, 0, 1],   # pos 3 can see pos 0,1,2,3
+        #  [0, 0, 0, 0, 0]]   # pos 4 can see all previous
         causal_mask = self.generate_square_subsequent_mask(target_seq_len, target_ids.device)
 
         # Combine causal mask with padding mask if provided
+        # tgt_padding_mask: [batch_size, 1, tgt_seq_len, tgt_seq_len] - RECTANGULAR shape
+        # Only masks PAD tokens (example with 2 PAD tokens at end):
+        # [[0, 0, 0, 1, 1],   # all positions: valid tokens=0, PAD=1
+        #  [0, 0, 0, 1, 1],
+        #  [0, 0, 0, 1, 1],
+        #  [0, 0, 0, 1, 1],
+        #  [0, 0, 0, 1, 1]]
         tgt_mask = causal_mask
+
+        # Final tgt_mask: TRIANGULAR + padding = both causal and PAD masking
+        # Combined result (causal_mask | tgt_padding_mask):
+        # [[0, 1, 1, 1, 1],   # pos 0: causal + PAD masking
+        #  [0, 0, 1, 1, 1],   # pos 1: causal + PAD masking
+        #  [0, 0, 0, 1, 1],   # pos 2: causal + PAD masking
+        #  [0, 0, 0, 1, 1],   # pos 3: only PAD masking (causal allows pos 3)
+        #  [0, 0, 0, 1, 1]]   # pos 4: only PAD masking (causal allows all)
         if tgt_padding_mask is not None:
-            tgt_mask = tgt_mask | tgt_padding_mask
+            tgt_mask = tgt_mask | tgt_padding_mask  # OR operation combines both masks
 
         if self.debug_mode:
             debug_print(tgt_mask, "tgt_mask", "Combined causal and padding mask", "Decoder: ")
@@ -330,7 +354,13 @@ class TransformerDecoder(nn.Module):
 
             if self.use_gradient_checkpointing and self.training:
                 x = torch.utils.checkpoint.checkpoint(
-                    self._layer_forward, layer, x, encoder_output, tgt_mask, src_padding_mask, use_reentrant=False
+                    self._layer_forward,
+                    layer,
+                    x,
+                    encoder_output,
+                    tgt_mask,
+                    src_padding_mask,
+                    use_reentrant=False,
                 )
             else:
                 x = layer(x, encoder_output, tgt_mask=tgt_mask, src_padding_mask=src_padding_mask)
