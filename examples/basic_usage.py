@@ -93,21 +93,22 @@ def main():
 
     # Create target sequences and masks (WITH SOS/EOS for decoder!)
     dummy_tgt_ids = torch.randint(1, config.tgt_vocab_size, (batch_size, target_seq_len)).to(device)
-    dummy_tgt_ids[:, 0] = config.sos_token_id  # Start with SOS token
     dummy_tgt_padding_mask = torch.zeros(
         batch_size, 1, target_seq_len, target_seq_len, dtype=torch.bool
     ).to(device)
 
     for i, length in enumerate(tgt_lengths):
-        dummy_tgt_ids[i, length:] = config.pad_token_id  # Add padding
+        dummy_tgt_ids[i, 0] = config.sos_token_id  # Start with SOS token
+        dummy_tgt_ids[i, length-1] = config.eos_token_id  # End with EOS token (before padding)
+        dummy_tgt_ids[i, length:] = config.pad_token_id  # Add padding after EOS
         dummy_tgt_padding_mask[i, :, length:, :] = True  # Mask rows (queries from padding)
         dummy_tgt_padding_mask[i, :, :, length:] = True  # Mask columns (keys to padding)
 
     # Example of resulting token arrays:
     # dummy_src_ids[0]: [45, 123, 67, 89, 234, 12, 456, 78, 90, 345, 23, 567] (length 12)
     # dummy_src_ids[1]: [12, 34, 56, 78, 90, 123, 45, 67, PAD, PAD, PAD, PAD] (length 8, padded)
-    # dummy_tgt_ids[0]: [SOS, 234, 567, 89, 123, 45, PAD, PAD, PAD] (length 6, padded)
-    # dummy_tgt_ids[1]: [SOS, 45, 678, 90, 234, 567, 89, 12, 345] (length 9)
+    # dummy_tgt_ids[0]: [SOS, 234, 567, 89, 123, EOS, PAD, PAD, PAD] (length 6: SOS + 4 tokens + EOS, padded)
+    # dummy_tgt_ids[1]: [SOS, 45, 678, 90, 234, 567, 89, 12, EOS] (length 9: SOS + 7 tokens + EOS)
 
     print(f"Source lengths: {src_lengths} -> padded to {source_seq_len}")
     print(f"Target lengths: {tgt_lengths} -> padded to {target_seq_len}")
@@ -123,13 +124,15 @@ def main():
     print(f"\nSource Padding Masks (T=masked, F=attend):")
     print(f"  Sequence 0: {['T' if x else 'F' for x in dummy_src_padding_mask[0, 0, 0].tolist()]}")
     print(f"  Sequence 1: {['T' if x else 'F' for x in dummy_src_padding_mask[1, 0, 0].tolist()]}")
-    print(f"\nTarget Padding Masks (T=masked, F=attend, showing diagonal):")
-    print(
-        f"  Sequence 0 diagonal: {['T' if x else 'F' for x in torch.diag(dummy_tgt_padding_mask[0, 0]).tolist()]}"
-    )
-    print(
-        f"  Sequence 1 diagonal: {['T' if x else 'F' for x in torch.diag(dummy_tgt_padding_mask[1, 0]).tolist()]}"
-    )
+    print(f"\nTarget Padding Masks (T=masked, F=attend):")
+    print(f"  Sequence 0 (length {tgt_lengths[0]}) - Full Matrix:")
+    for i in range(target_seq_len):
+        row = ['T' if x else 'F' for x in dummy_tgt_padding_mask[0, 0, i].tolist()]
+        print(f"    Row {i}: {row}")
+    print(f"  Sequence 1 (length {tgt_lengths[1]}) - Full Matrix:")
+    for i in range(target_seq_len):
+        row = ['T' if x else 'F' for x in dummy_tgt_padding_mask[1, 0, i].tolist()]
+        print(f"    Row {i}: {row}")
 
     # --- Simulate Training ---
     print("\n--- Simulating a training step ---")
