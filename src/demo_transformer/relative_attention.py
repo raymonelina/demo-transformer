@@ -156,6 +156,47 @@ class RelativeMultiHeadAttention(nn.Module):
             result[:, :, i, :] = x[:, :, i, start_pos:start_pos + seq_len]
             
         return result
+    
+    def _rel_shift_cross_attention(self, x: torch.Tensor, seq_len_q: int, seq_len_k: int) -> torch.Tensor:
+        """
+        Shift relative logits for cross-attention where query and key lengths may differ.
+        
+        Args:
+            x: Input tensor [batch_size, num_heads, seq_len_q, 2*seq_len_k-1]
+            seq_len_q: Query sequence length
+            seq_len_k: Key sequence length
+            
+        Returns:
+            Shifted tensor [batch_size, num_heads, seq_len_q, seq_len_k]
+        """
+        batch_size, num_heads, _, _ = x.size()
+        
+        # Create output tensor
+        result = torch.zeros((batch_size, num_heads, seq_len_q, seq_len_k), device=x.device, dtype=x.dtype)
+        
+        # Center position in the relative position embeddings
+        center_pos = seq_len_k - 1
+        
+        # For each query position, extract the relevant key positions
+        for i in range(seq_len_q):
+            # For cross-attention, we want relative positions from query i to all keys
+            # This is different from self-attention where positions are symmetric
+            start_pos = center_pos - seq_len_k + 1
+            end_pos = start_pos + seq_len_k
+            
+            # Ensure we don't go out of bounds
+            start_pos = max(0, start_pos)
+            end_pos = min(x.size(-1), end_pos)
+            
+            # Extract the slice and pad if necessary
+            slice_len = end_pos - start_pos
+            if slice_len == seq_len_k:
+                result[:, :, i, :] = x[:, :, i, start_pos:end_pos]
+            else:
+                # Pad with zeros if we don't have enough positions
+                result[:, :, i, :slice_len] = x[:, :, i, start_pos:end_pos]
+                
+        return result
 
     def forward(
         self,
@@ -279,7 +320,7 @@ class RelativeMultiHeadAttention(nn.Module):
         # Shift and slice position scores to align them
         # Input: [batch, heads, seq_len_q, 2*seq_len_k-1] → Output: [batch, heads, seq_len_q, seq_len_k]
         # This transforms from "all possible relative positions" to "actual query-key pairs"
-        rel_position_scores = self._rel_shift(position_scores)
+        rel_position_scores = self._rel_shift_cross_attention(position_scores, seq_len_q, seq_len_k)
         if self.debug_mode:
             debug_print(
                 rel_position_scores,
