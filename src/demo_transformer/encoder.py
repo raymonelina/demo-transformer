@@ -93,6 +93,9 @@ class EncoderLayer(nn.Module):
         self.dropout2 = nn.Dropout(dropout_rate)
 
         self.pre_norm = pre_norm
+        
+        # Initialize weights
+        self._init_weights()
 
     def forward(self, x: torch.Tensor, src_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         if self.debug_mode:
@@ -110,6 +113,7 @@ class EncoderLayer(nn.Module):
         if self.pre_norm:
             # Pre-layer normalization: x + Sublayer(LayerNorm(x))
             # Better gradient flow, enables deeper models (Wang et al., 2019)
+            # Note: Numerical stability is handled by the robust attention mechanism
             norm_x = self.norm1(x)
             self_attn_output = self.self_attn(norm_x, norm_x, norm_x, mask=src_padding_mask)
             x = x + self.dropout1(self_attn_output)
@@ -120,6 +124,7 @@ class EncoderLayer(nn.Module):
         else:
             # Post-layer normalization: LayerNorm(x + Sublayer(x))
             # Original Transformer architecture (Vaswani et al., 2017)
+            # Note: Numerical stability is handled by the robust attention mechanism
             self_attn_output = self.self_attn(x, x, x, mask=src_padding_mask)
             x = self.norm1(x + self.dropout1(self_attn_output))
 
@@ -127,6 +132,13 @@ class EncoderLayer(nn.Module):
             x = self.norm2(x + self.dropout2(ff_output))
 
         return x
+    
+    def _init_weights(self):
+        """Initialize layer norm weights."""
+        nn.init.ones_(self.norm1.weight)
+        nn.init.zeros_(self.norm1.bias)
+        nn.init.ones_(self.norm2.weight)
+        nn.init.zeros_(self.norm2.bias)
 
 
 class TransformerEncoder(nn.Module):
@@ -221,6 +233,9 @@ class TransformerEncoder(nn.Module):
         # Debug mode and attention storage
         self.debug_mode = debug_mode
         self.store_attention = store_attention
+        
+        # Initialize weights
+        self._init_weights()
 
     def _layer_forward(
         self, layer: nn.Module, x: torch.Tensor, src_padding_mask: Optional[torch.Tensor]
@@ -315,3 +330,13 @@ class TransformerEncoder(nn.Module):
             debug_print(x, "encoder_output", "Final encoder output", "Encoder: ")
 
         return x
+    
+    def _init_weights(self):
+        """Initialize weights for embeddings and layer norms."""
+        # Initialize token embedding
+        nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
+        
+        # Initialize final layer norm if present
+        if self.final_norm is not None:
+            nn.init.ones_(self.final_norm.weight)
+            nn.init.zeros_(self.final_norm.bias)

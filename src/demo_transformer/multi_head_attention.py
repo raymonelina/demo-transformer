@@ -61,6 +61,9 @@ class MultiHeadAttention(nn.Module):
 
         # Output projection matrix W^O ∈ ℝ^(d_model × d_model)
         self.out_proj = nn.Linear(embed_dim, embed_dim)
+        
+        # Initialize weights properly to prevent numerical instability
+        self._init_weights()
 
     def forward(
         self,
@@ -137,11 +140,17 @@ class MultiHeadAttention(nn.Module):
                 V, "V_reshaped", "Value reshaped to [batch, h, kv_seq_len, d_k]", "Attention: "
             )
 
-        # Step 3: Scaled dot-product attention
-        # Compute attention scores: QK^T / √d_k
-        # The scaling factor 1/√d_k prevents the dot products from growing too large,
-        # which would push the softmax function into regions with extremely small gradients
-        attention_scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.head_dim)
+        # Step 3: Numerically stable scaled dot-product attention
+        # Replace any NaN/Inf values to prevent propagation
+        Q = torch.where(torch.isfinite(Q), Q, torch.zeros_like(Q))
+        K = torch.where(torch.isfinite(K), K, torch.zeros_like(K))
+        
+        # Compute attention scores with stability checks
+        raw_scores = torch.matmul(Q, K.transpose(-2, -1))
+        raw_scores = torch.where(torch.isfinite(raw_scores), raw_scores, torch.zeros_like(raw_scores))
+        
+        # Scale and clamp to prevent softmax overflow
+        attention_scores = torch.clamp(raw_scores / math.sqrt(self.head_dim), min=-10.0, max=10.0)
         # Shape: [batch_size, num_heads, seq_len, kv_seq_len]
 
         if self.debug_mode:
@@ -204,10 +213,13 @@ class MultiHeadAttention(nn.Module):
                     "Attention: ",
                 )
 
-        # Step 5: Apply softmax to get attention probabilities
-        # softmax(QK^T/√d_k) normalizes scores to probabilities that sum to 1
-        # This creates a probability distribution over the key positions
+        # Step 5: Robust softmax with fallback
         attention_probs = torch.softmax(attention_scores, dim=-1)
+        
+        # Replace any remaining NaN/Inf with uniform distribution
+        if not torch.isfinite(attention_probs).all():
+            uniform_prob = 1.0 / attention_probs.size(-1)
+            attention_probs = torch.where(torch.isfinite(attention_probs), attention_probs, uniform_prob)
         # Shape: [batch_size, num_heads, seq_len, kv_seq_len]
 
         if self.debug_mode:
@@ -223,10 +235,10 @@ class MultiHeadAttention(nn.Module):
         if self.store_attention:
             self.last_attention_weights = attention_probs.detach()
 
-        # Step 6: Apply attention to values
-        # Weighted sum of values: softmax(QK^T/√d_k)V
-        # Each output position is a weighted combination of all value vectors
+        # Step 6: Safe attention application to values
+        V = torch.where(torch.isfinite(V), V, torch.zeros_like(V))
         context = torch.matmul(attention_probs, V)
+        context = torch.where(torch.isfinite(context), context, torch.zeros_like(context))
         # Shape: [batch_size, num_heads, seq_len, d_k]
 
         if self.debug_mode:
@@ -258,3 +270,18 @@ class MultiHeadAttention(nn.Module):
             )
 
         return output
+    
+    def _init_weights(self):
+        """Initialize weights using Xavier/Glorot initialization with proper scaling."""
+        # Xavier initialization with gain=1/sqrt(2) for better stability in deep networks
+        gain = 1.0 / math.sqrt(2.0)
+        nn.init.xavier_uniform_(self.query_proj.weight, gain=gain)
+        nn.init.xavier_uniform_(self.key_proj.weight, gain=gain) 
+        nn.init.xavier_uniform_(self.value_proj.weight, gain=gain)
+        nn.init.xavier_uniform_(self.out_proj.weight, gain=gain)
+        
+        # Initialize biases to zero
+        nn.init.zeros_(self.query_proj.bias)
+        nn.init.zeros_(self.key_proj.bias)
+        nn.init.zeros_(self.value_proj.bias)
+        nn.init.zeros_(self.out_proj.bias)

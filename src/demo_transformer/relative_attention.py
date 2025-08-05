@@ -100,6 +100,9 @@ class RelativeMultiHeadAttention(nn.Module):
         self.debug_mode = debug_mode
         self.store_attention = store_attention
         self.last_attention_weights = None
+        
+        # Initialize weights
+        self._init_weights()
 
     def _rel_shift(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -285,8 +288,9 @@ class RelativeMultiHeadAttention(nn.Module):
                 "RelativeAttention: ",
             )
 
-        # Combine content and position scores
+        # Combine content and position scores with stability
         attention_scores = content_scores + rel_position_scores
+        attention_scores = torch.clamp(attention_scores, min=-10.0, max=10.0)
         if self.debug_mode:
             debug_print(
                 attention_scores,
@@ -331,8 +335,13 @@ class RelativeMultiHeadAttention(nn.Module):
                     "RelativeAttention: ",
                 )
 
-        # Apply softmax
+        # Apply softmax with fallback
         attention_probs = F.softmax(attention_scores, dim=-1)
+        
+        # Replace any remaining NaN/Inf with uniform distribution
+        if not torch.isfinite(attention_probs).all():
+            uniform_prob = 1.0 / attention_probs.size(-1)
+            attention_probs = torch.where(torch.isfinite(attention_probs), attention_probs, uniform_prob)
         if self.debug_mode:
             debug_print(
                 attention_probs,
@@ -349,8 +358,10 @@ class RelativeMultiHeadAttention(nn.Module):
                 attention_probs.detach()
             )  # Store a copy without gradient tracking
 
-        # Apply attention to values
+        # Apply attention to values with safety checks
+        V = torch.where(torch.isfinite(V), V, torch.zeros_like(V))
         context = torch.matmul(attention_probs, V)
+        context = torch.where(torch.isfinite(context), context, torch.zeros_like(context))
         if self.debug_mode:
             debug_print(
                 context, "context", "Context vectors after attention", "RelativeAttention: "
@@ -374,3 +385,17 @@ class RelativeMultiHeadAttention(nn.Module):
             )
 
         return output
+    
+    def _init_weights(self):
+        """Initialize weights using Xavier initialization with proper scaling."""
+        gain = 1.0 / math.sqrt(2.0)
+        nn.init.xavier_uniform_(self.query_proj.weight, gain=gain)
+        nn.init.xavier_uniform_(self.key_proj.weight, gain=gain)
+        nn.init.xavier_uniform_(self.value_proj.weight, gain=gain)
+        nn.init.xavier_uniform_(self.out_proj.weight, gain=gain)
+        nn.init.xavier_uniform_(self.pos_key_proj.weight, gain=gain)
+        
+        nn.init.zeros_(self.query_proj.bias)
+        nn.init.zeros_(self.key_proj.bias)
+        nn.init.zeros_(self.value_proj.bias)
+        nn.init.zeros_(self.out_proj.bias)

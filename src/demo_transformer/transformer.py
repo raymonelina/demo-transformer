@@ -13,6 +13,7 @@ from .debug_utils import debug_print
 from .visualization import plot_attention_weights, plot_embeddings_pca, plot_attention_heads
 
 
+
 class Transformer(nn.Module):
     """
     A complete Encoder-Decoder Transformer model for sequence-to-sequence tasks.
@@ -103,15 +104,14 @@ class Transformer(nn.Module):
         # • Source and target vocabularies must be the same size
         # • Only works for encoder-decoder with shared vocabulary (e.g., same language)
         # 
-        if config.weight_tying and config.src_vocab_size == config.tgt_vocab_size:
-            # Share the weight matrix between input embedding and output projection
-            # decoder.token_embedding.weight: [tgt_vocab_size, embed_dim]
-            # decoder.output_projection.weight: [tgt_vocab_size, embed_dim] (will be transposed in forward)
+        # Store weight tying config and apply after initialization
+        self.weight_tying = config.weight_tying and config.src_vocab_size == config.tgt_vocab_size
+        
+        # Apply weight tying after components have initialized themselves
+        if self.weight_tying:
             self.decoder.output_projection.weight = self.decoder.token_embedding.weight
-            
-            # Note: PyTorch Linear layer automatically transposes weight matrix during forward pass:
-            # output = input @ weight.T + bias
-            # So embedding weight [vocab_size, embed_dim] becomes [embed_dim, vocab_size] for projection
+        
+
 
     def forward(
         self,
@@ -598,3 +598,7 @@ class Transformer(nn.Module):
             raise ValueError(f"Unknown attention type: {attention_type}")
 
         return plot_attention_heads(attention_weights, tokens=tokens, layer_idx=layer_idx, **kwargs)
+    
+
+    
+

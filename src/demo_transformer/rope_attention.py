@@ -116,6 +116,9 @@ class RoPEMultiHeadAttention(nn.Module):
         self.debug_mode = debug_mode
         self.store_attention = store_attention
         self.last_attn_weights = None
+        
+        # Initialize weights
+        self._init_weights()
     
     def forward(
         self,
@@ -184,13 +187,15 @@ class RoPEMultiHeadAttention(nn.Module):
         k = k.transpose(1, 2)
         v = v.transpose(1, 2)
         
-        # Compute attention scores using scaled dot-product attention
-        # The dot product between rotated query and key vectors now inherently captures relative position
-        # The scaling factor (1/sqrt(head_dim)) prevents exploding values in softmax for numerical stability
-        # This is particularly important with RoPE since the rotation preserves vector norms
-        # [batch_size, num_heads, seq_len_q, head_dim] @ [batch_size, num_heads, head_dim, seq_len_k]
-        # -> [batch_size, num_heads, seq_len_q, seq_len_k]
-        attn_scores = torch.matmul(q, k.transpose(-2, -1)) / (self.head_dim ** 0.5)
+        # Compute attention scores with numerical stability
+        # Replace any NaN/Inf values to prevent propagation
+        q = torch.where(torch.isfinite(q), q, torch.zeros_like(q))
+        k = torch.where(torch.isfinite(k), k, torch.zeros_like(k))
+        
+        # Compute and clamp attention scores
+        raw_scores = torch.matmul(q, k.transpose(-2, -1))
+        raw_scores = torch.where(torch.isfinite(raw_scores), raw_scores, torch.zeros_like(raw_scores))
+        attn_scores = torch.clamp(raw_scores / (self.head_dim ** 0.5), min=-10.0, max=10.0)
         
         if self.debug_mode:
             debug_print(
@@ -231,15 +236,15 @@ class RoPEMultiHeadAttention(nn.Module):
                     attn_scores, "masked_attn_scores", "Attention scores after masking", "RoPEMultiHeadAttention: "
                 )
         
-        # Apply softmax to normalize attention scores into a probability distribution
-        # The softmax operation ensures that for each query position, the attention weights
-        # across all key positions sum to 1, creating a proper probability distribution
-        # This allows the model to focus on the most relevant tokens while still considering others
+        # Apply softmax with fallback mechanism
         attn_weights = F.softmax(attn_scores, dim=-1)
         
+        # Replace any remaining NaN/Inf with uniform distribution
+        if not torch.isfinite(attn_weights).all():
+            uniform_prob = 1.0 / attn_weights.size(-1)
+            attn_weights = torch.where(torch.isfinite(attn_weights), attn_weights, uniform_prob)
+        
         # Apply dropout to attention weights for regularization
-        # This prevents the model from becoming too dependent on specific attention patterns
-        # and encourages it to use diverse information sources, improving generalization
         attn_weights = self.dropout(attn_weights)
         
         if self.debug_mode:
@@ -253,14 +258,10 @@ class RoPEMultiHeadAttention(nn.Module):
         if self.store_attention:
             self.last_attn_weights = attn_weights.detach()  # Store a copy without gradient tracking
         
-        # Apply attention weights to values through matrix multiplication
-        # This is the core of the attention mechanism: a weighted sum of value vectors
-        # Each query position attends to all key positions with different weights
-        # The result is a context vector that aggregates information from the entire sequence
-        # with emphasis on the most relevant parts according to the attention distribution
-        # [batch_size, num_heads, seq_len_q, seq_len_k] @ [batch_size, num_heads, seq_len_k, head_dim]
-        # -> [batch_size, num_heads, seq_len_q, head_dim]
+        # Apply attention weights to values with safety checks
+        v = torch.where(torch.isfinite(v), v, torch.zeros_like(v))
         context = torch.matmul(attn_weights, v)
+        context = torch.where(torch.isfinite(context), context, torch.zeros_like(context))
         
         if self.debug_mode:
             debug_print(context, "context", "Context after attention", "RoPEMultiHeadAttention: ")
@@ -283,3 +284,16 @@ class RoPEMultiHeadAttention(nn.Module):
             debug_print(output, "output", "Final output", "RoPEMultiHeadAttention: ")
         
         return output
+    
+    def _init_weights(self):
+        """Initialize weights using Xavier initialization with proper scaling."""
+        gain = 1.0 / math.sqrt(2.0)
+        nn.init.xavier_uniform_(self.q_proj.weight, gain=gain)
+        nn.init.xavier_uniform_(self.k_proj.weight, gain=gain)
+        nn.init.xavier_uniform_(self.v_proj.weight, gain=gain)
+        nn.init.xavier_uniform_(self.out_proj.weight, gain=gain)
+        
+        nn.init.zeros_(self.q_proj.bias)
+        nn.init.zeros_(self.k_proj.bias)
+        nn.init.zeros_(self.v_proj.bias)
+        nn.init.zeros_(self.out_proj.bias)

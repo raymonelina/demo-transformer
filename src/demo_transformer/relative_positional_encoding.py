@@ -32,10 +32,10 @@ class RelativePositionalEncoding(nn.Module):
         )
 
         # Initialize with sinusoidal pattern
-        self._init_embeddings()
+        self._init_weights()
 
-    def _init_embeddings(self):
-        """Initialize embeddings with sinusoidal pattern."""
+    def _init_weights(self):
+        """Initialize parameter embeddings with sinusoidal pattern."""
         positions = torch.arange(-(self.max_seq_len - 1), self.max_seq_len).unsqueeze(1)
         div_term = torch.exp(
             torch.arange(0, self.embed_dim, 2).float() * (-math.log(10000.0) / self.embed_dim)

@@ -95,6 +95,9 @@ class DecoderLayer(nn.Module):
         self.dropout3 = nn.Dropout(dropout_rate)
 
         self.pre_norm = pre_norm
+        
+        # Initialize weights
+        self._init_weights()
 
     def forward(
         self,
@@ -159,6 +162,15 @@ class DecoderLayer(nn.Module):
             x = self.norm3(x + self.dropout3(ff_output))
 
         return x
+    
+    def _init_weights(self):
+        """Initialize layer norm weights."""
+        nn.init.ones_(self.norm1.weight)
+        nn.init.zeros_(self.norm1.bias)
+        nn.init.ones_(self.norm2.weight)
+        nn.init.zeros_(self.norm2.bias)
+        nn.init.ones_(self.norm3.weight)
+        nn.init.zeros_(self.norm3.bias)
 
 
 class TransformerDecoder(nn.Module):
@@ -238,6 +250,9 @@ class TransformerDecoder(nn.Module):
         # Debug mode and attention storage
         self.debug_mode = debug_mode
         self.store_attention = store_attention
+        
+        # Initialize weights
+        self._init_weights()
 
     def generate_square_subsequent_mask(self, sz: int, device: torch.device) -> torch.Tensor:
         """
@@ -384,3 +399,18 @@ class TransformerDecoder(nn.Module):
             debug_print(logits, "decoder_logits", "Final decoder output logits", "Decoder: ")
 
         return logits
+    
+    def _init_weights(self):
+        """Initialize weights for embeddings, output projection, and layer norms."""
+        # Initialize token embedding
+        nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
+        
+        # Initialize output projection
+        nn.init.xavier_uniform_(self.output_projection.weight)
+        if self.output_projection.bias is not None:
+            nn.init.zeros_(self.output_projection.bias)
+        
+        # Initialize final layer norm if present
+        if self.final_norm is not None:
+            nn.init.ones_(self.final_norm.weight)
+            nn.init.zeros_(self.final_norm.bias)
