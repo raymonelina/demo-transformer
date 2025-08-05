@@ -9,6 +9,7 @@ as described in "RoFormer: Enhanced Transformer with Rotary Position Embedding"
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
 from typing import Optional, Tuple
 
 from .debug_utils import debug_print
@@ -171,7 +172,7 @@ class RoPEMultiHeadAttention(nn.Module):
         # Unlike standard positional encoding, RoPE doesn't add position information but rotates vectors
         # This preserves the inner product structure while encoding position information
         # We use the maximum sequence length between query and key to ensure proper rotation
-        q, k = self.rope.apply_rotary_pos_emb(q, k, max(seq_len_q, seq_len_k))
+        q, k = self.rope.apply_rotary_pos_emb(q, k, seq_len_q, seq_len_k)
         
         if self.debug_mode:
             debug_print(q, "q_rotary", "Query after rotary encoding", "RoPEMultiHeadAttention: ")

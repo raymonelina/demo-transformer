@@ -88,38 +88,44 @@ class RotaryPositionalEncoding(nn.Module):
         return torch.cat((-x2, x1), dim=-1)
     
     def apply_rotary_pos_emb(
-        self, q: torch.Tensor, k: torch.Tensor, seq_len: int
+        self, q: torch.Tensor, k: torch.Tensor, seq_len_q: int, seq_len_k: int = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Apply rotary position embeddings to query and key tensors.
         
         Args:
-            q: Query tensor [batch_size, seq_len, num_heads, head_dim]
-            k: Key tensor [batch_size, seq_len, num_heads, head_dim]
-            seq_len: Sequence length
+            q: Query tensor [batch_size, seq_len_q, num_heads, head_dim]
+            k: Key tensor [batch_size, seq_len_k, num_heads, head_dim]
+            seq_len_q: Query sequence length
+            seq_len_k: Key sequence length (defaults to seq_len_q if None)
             
         Returns:
             Tuple of (rotated_q, rotated_k) with same shapes as inputs
         """
-        if seq_len > self.max_seq_len:
+        if seq_len_k is None:
+            seq_len_k = seq_len_q
+            
+        if seq_len_q > self.max_seq_len or seq_len_k > self.max_seq_len:
             raise ValueError(
-                f"Input sequence length ({seq_len}) exceeds max_seq_len ({self.max_seq_len})"
+                f"Input sequence lengths ({seq_len_q}, {seq_len_k}) exceed max_seq_len ({self.max_seq_len})"
             )
         
-        # Get the relevant frequencies for the current sequence length
-        freqs_cis = self._freqs_cis[:seq_len]
+        # Get the relevant frequencies for each sequence length
+        freqs_cis_q = self._freqs_cis[:seq_len_q]
+        freqs_cis_k = self._freqs_cis[:seq_len_k]
         
         # Reshape for broadcasting
         # [seq_len, dim/2] -> [1, seq_len, 1, dim/2]
-        freqs_cis = freqs_cis.unsqueeze(0).unsqueeze(2)
+        freqs_cis_q = freqs_cis_q.unsqueeze(0).unsqueeze(2)
+        freqs_cis_k = freqs_cis_k.unsqueeze(0).unsqueeze(2)
         
         # Convert to complex representation
         q_complex = torch.view_as_complex(q.float().reshape(*q.shape[:-1], -1, 2))
         k_complex = torch.view_as_complex(k.float().reshape(*k.shape[:-1], -1, 2))
         
-        # Apply complex rotation
-        q_out = torch.view_as_real(q_complex * freqs_cis).flatten(-2)
-        k_out = torch.view_as_real(k_complex * freqs_cis).flatten(-2)
+        # Apply complex rotation with appropriate frequencies
+        q_out = torch.view_as_real(q_complex * freqs_cis_q).flatten(-2)
+        k_out = torch.view_as_real(k_complex * freqs_cis_k).flatten(-2)
         
         # Convert back to the original dtype if needed
         q_out = q_out.type_as(q)
