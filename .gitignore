@@ -32,3 +32,4 @@ Thumbs.db
 *.pth
 *.safetensors
 *.bin
+*.png
