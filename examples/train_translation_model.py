@@ -336,7 +336,7 @@ def train_model(src_data, tgt_data, en_vocab, zh_vocab, save_dir="./translation_
         print(f"\nResuming from epoch {start_epoch + 1}")
     
     # Training parameters
-    num_epochs = 10  # More epochs for full dataset
+    num_epochs = 2000  # More epochs for full dataset
     save_every = 1   # Save every 1 epochs
     
     print(f"\nTraining Parameters:")
@@ -352,6 +352,7 @@ def train_model(src_data, tgt_data, en_vocab, zh_vocab, save_dir="./translation_
     
     # Training loop with detailed stats
     best_val_loss = float('inf')
+    avg_train_loss = 0.0  # Initialize to avoid UnboundLocalError
     
     for epoch in range(start_epoch, num_epochs):
         # Training phase
