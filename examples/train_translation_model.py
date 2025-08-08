@@ -187,7 +187,11 @@ def save_model(model, optimizer, scheduler, epoch, loss, save_dir, config, en_vo
     print(f"  Model saved: {model_size:.1f} MB")
 
 
-def train_model(src_data, tgt_data, en_vocab, zh_vocab, save_dir="./translation_model"):
+def train_model(src_data, tgt_data, en_vocab, zh_vocab, save_dir=None):
+    """Train the transformer model with resumable training and detailed stats."""
+    if save_dir is None:
+        save_dir = os.path.expanduser("~/models/translation_model")
+        print(f"Using default save directory: {save_dir}")
     """Train the transformer model with resumable training and detailed stats."""
     print("\n" + "="*60)
     print("TRAINING TRANSFORMER MODEL")
@@ -399,14 +403,17 @@ def train_model(src_data, tgt_data, en_vocab, zh_vocab, save_dir="./translation_
             best_model_dir = os.path.join(save_dir, "best_model")
             save_model(model, optimizer, scheduler, epoch + 1, avg_train_loss, best_model_dir, config, en_vocab, zh_vocab)
             print(f"  *** New best model saved! (Train Loss: {best_val_loss:.4f}) ***")
+            print(f"  *** Location: {best_model_dir} ***")
         
         # Periodic saving
         if (epoch + 1) % save_every == 0:
             save_model(model, optimizer, scheduler, epoch + 1, avg_train_loss, save_dir, config, en_vocab, zh_vocab)
             print(f"  Model saved at epoch {epoch+1}")
+            print(f"  Location: {save_dir}")
     
     # Final save
     save_model(model, optimizer, scheduler, num_epochs, avg_train_loss, save_dir, config, en_vocab, zh_vocab)
+    print(f"Final model saved to: {save_dir}")
     
     print("\n" + "="*60)
     print("TRAINING COMPLETED!")
@@ -463,8 +470,9 @@ def main():
     print(f"  - Chinese vocabulary: {len(zh_vocab):,} tokens")
 
     
-    # Train model
-    model, config = train_model(src_data, tgt_data, en_vocab, zh_vocab)
+    # Train model - save to user's home directory
+    save_dir = os.path.expanduser("~/models/translation_model")
+    model, config = train_model(src_data, tgt_data, en_vocab, zh_vocab, save_dir)
     
     print("\nTraining completed successfully!")
     print("Run 'uv run python examples/inference_translation_model.py' to test the trained model.")

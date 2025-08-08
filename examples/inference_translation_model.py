@@ -18,7 +18,11 @@ def tokenize_sentence(sentence, vocab, is_chinese=False):
     return [vocab.get(token, vocab["<unk>"]) for token in tokens]
 
 
-def load_model_and_vocabs(save_dir="./translation_model", use_best=True):
+def load_model_and_vocabs(save_dir=None, use_best=True):
+    """Load trained model and vocabularies."""
+    if save_dir is None:
+        save_dir = os.path.expanduser("~/models/translation_model")
+        print(f"Using default model directory: {save_dir}")
     """Load trained model and vocabularies."""
     print(f"Loading model from {save_dir}...")
     
