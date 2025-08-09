@@ -312,6 +312,21 @@ def train_model(src_data, tgt_data, en_vocab, zh_vocab, save_dir=None):
     print(f"  - Training samples: {len(src_data)}")
     print(f"  - Training batches: {len(train_loader)}")
     
+    # --- PyTorch 2.0 Compilation (for performance) ---
+    # If using PyTorch 2.0+, torch.compile can significantly speed up the model.
+    # Note: torch.compile support for Apple's MPS is still experimental and may fail.
+    if hasattr(torch, 'compile') and device.type != 'mps':
+        print("\nAttempting to compile model with torch.compile... (requires PyTorch 2.0+)")
+        try:
+            model = torch.compile(model, mode="max-autotune")
+            print("  - Model compiled successfully.")
+        except Exception as e:
+            print(f"  - Model compilation failed: {e}")
+    elif device.type == 'mps':
+        print("\nSkipping model compilation: torch.compile support for MPS is experimental.")
+    else:
+        print("\nSkipping model compilation (torch.compile not available).")
+
     # Model parameters
     total_params = sum(p.numel() for p in model.parameters())
     print(f"\nModel parameters: {total_params:,}")

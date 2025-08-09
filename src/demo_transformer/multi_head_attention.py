@@ -24,6 +24,10 @@ class MultiHeadAttention(nn.Module):
         debug_mode: Whether to print debug information about tensors.
         store_attention: If True, uses a manual implementation to store attention weights.
                          If False, uses a faster, fused implementation.
+
+    Note:
+        For maximum performance, this module and any model containing it can be
+        wrapped with `torch.compile(model)`.
     """
 
     def __init__(
@@ -163,7 +167,7 @@ class MultiHeadAttention(nn.Module):
             #   * Used in: DECODER ONLY (self-attention)
             #   * Purpose: maintain autoregressive property during training
             # - Combined mask: padding + causal masks element-wise OR'd together
-            #   * Used in: DECODER cross-attention (query padding + key padding)
+            #   * Used in: DECODER self-attention
             #   * Purpose: handle both sequence lengths in encoder-decoder attention
             #
             # Mask prevents attention to certain positions by setting scores to -∞
@@ -185,8 +189,10 @@ class MultiHeadAttention(nn.Module):
                 # Apply the mask. It can be a boolean mask (True for masked positions)
                 # or a float additive mask (0.0 for keep, -inf for mask).
                 if mask.dtype == torch.bool:
+                    mask = mask.to(Q.device)
                     attention_scores = attention_scores.masked_fill(mask, float("-inf"))
                 else:
+                    mask = mask.to(Q.device).to(attention_scores.dtype)
                     attention_scores = attention_scores + mask
 
                 if self.debug_mode:
@@ -201,10 +207,9 @@ class MultiHeadAttention(nn.Module):
             attention_probs = torch.softmax(attention_scores, dim=-1)
 
             # Check for rows that are not finite, which can happen if all scores
-            # in a row are -inf after masking. Replace these with a uniform distribution.
+            # in a row are -inf after masking. Replace these with zeros.
             is_bad_row = ~torch.isfinite(attention_probs).all(dim=-1, keepdim=True)
-            uniform_probs = torch.full_like(attention_probs, 1.0 / attention_probs.size(-1))
-            attention_probs = torch.where(is_bad_row, uniform_probs, attention_probs)
+            attention_probs = torch.where(is_bad_row, torch.zeros_like(attention_probs), attention_probs)
             # Shape: [batch_size, num_heads, seq_len, kv_seq_len]
 
             if self.debug_mode:
@@ -215,12 +220,12 @@ class MultiHeadAttention(nn.Module):
                     "Attention: ",
                 )
 
-            # Apply attention dropout for regularization
-            attention_probs = self.attn_dropout(attention_probs)
-
             # Store attention weights for visualization (path is active because self.store_attention is True)
             # Detach from computation graph to avoid affecting gradients
             self.last_attention_weights = attention_probs.detach()
+
+            # Apply attention dropout for regularization
+            attention_probs = self.attn_dropout(attention_probs)
 
             # Step 6: Apply attention to values
             context = torch.matmul(attention_probs, V)
@@ -237,10 +242,11 @@ class MultiHeadAttention(nn.Module):
             self.last_attention_weights = None
             final_mask = None
             if mask is not None:
+                mask = mask.to(Q.device)
                 if mask.dim() == 2: mask = mask.unsqueeze(1).unsqueeze(2)
                 elif mask.dim() == 3: mask = mask.unsqueeze(1)
                 if mask.dtype != torch.bool:
-                    final_mask = mask < 0
+                    final_mask = mask.to(Q.dtype)
                 else:
                     final_mask = mask
 
