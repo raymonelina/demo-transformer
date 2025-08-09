@@ -2,6 +2,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import math
 from typing import Optional
 
@@ -12,31 +13,24 @@ class MultiHeadAttention(nn.Module):
     """
     Multi-Head Attention mechanism as described in "Attention Is All You Need" (Vaswani et al., 2017).
 
-    The multi-head attention mechanism allows the model to jointly attend to information
-    from different representation subspaces at different positions. Mathematically:
-
-    MultiHead(Q, K, V) = Concat(head₁, ..., headₕ)W^O
-    where headᵢ = Attention(QWᵢ^Q, KWᵢ^K, VWᵢ^V)
-
-    And the scaled dot-product attention is defined as:
-    Attention(Q, K, V) = softmax(QK^T / √dₖ)V
-
-    Can be used for:
-    - Self-attention (query=key=value) in encoder layers
-    - Cross-attention in decoder layers (query from decoder, key/value from encoder)
-    - Masked self-attention in decoder layers (with causal mask)
+    This implementation uses torch.nn.functional.scaled_dot_product_attention for performance
+    when `store_attention` is False, and falls back to a manual implementation when it is True
+    to allow for introspection of attention weights.
 
     Args:
         embed_dim: Model dimensionality (d_model in the paper)
         num_heads: Number of parallel attention heads (h in the paper)
-        debug_mode: Whether to print debug information about tensors
-        store_attention: Whether to store attention weights for visualization
+        dropout_prob: Dropout probability for attention weights and output projection.
+        debug_mode: Whether to print debug information about tensors.
+        store_attention: If True, uses a manual implementation to store attention weights.
+                         If False, uses a faster, fused implementation.
     """
 
     def __init__(
         self,
         embed_dim: int,
         num_heads: int,
+        dropout_prob: float = 0.1,
         debug_mode: bool = False,
         store_attention: bool = False,
     ):
@@ -46,23 +40,25 @@ class MultiHeadAttention(nn.Module):
                 f"Embedding dimension ({embed_dim}) must be divisible by number of heads ({num_heads})"
             )
 
-        self.embed_dim = embed_dim  # d_model
-        self.num_heads = num_heads  # h
-        self.head_dim = embed_dim // num_heads  # d_k = d_v = d_model / h
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
         self.debug_mode = debug_mode
         self.store_attention = store_attention
         self.last_attention_weights = None
 
         # Linear projections for queries, keys, and values
-        # These implement the learned parameter matrices W^Q, W^K, W^V
-        self.query_proj = nn.Linear(embed_dim, embed_dim)  # W^Q ∈ ℝ^(d_model × d_model)
-        self.key_proj = nn.Linear(embed_dim, embed_dim)  # W^K ∈ ℝ^(d_model × d_model)
-        self.value_proj = nn.Linear(embed_dim, embed_dim)  # W^V ∈ ℝ^(d_model × d_model)
+        self.query_proj = nn.Linear(embed_dim, embed_dim)
+        self.key_proj = nn.Linear(embed_dim, embed_dim)
+        self.value_proj = nn.Linear(embed_dim, embed_dim)
 
-        # Output projection matrix W^O ∈ ℝ^(d_model × d_model)
+        # Output projection matrix
         self.out_proj = nn.Linear(embed_dim, embed_dim)
+
+        # Dropout layers
+        self.attn_dropout = nn.Dropout(dropout_prob)
+        self.out_dropout = nn.Dropout(dropout_prob)
         
-        # Initialize weights properly to prevent numerical instability
         self._init_weights()
 
     def forward(
@@ -74,30 +70,21 @@ class MultiHeadAttention(nn.Module):
     ):
         """
         Forward pass implementing multi-head attention.
-
-        Mathematical formulation:
-        1. Linear projections: Q = XW^Q, K = XW^K, V = XW^V
-        2. Reshape for multi-head: Split d_model into h heads of dimension d_k
-        3. Scaled dot-product attention per head: Attention(Q, K, V) = softmax(QK^T/√d_k)V
-        4. Concatenate heads and apply output projection
-
-        Args:
-            query: Query tensor [batch_size, seq_len, d_model]
-            key: Key tensor [batch_size, kv_seq_len, d_model]
-            value: Value tensor [batch_size, kv_seq_len, d_model]
-            mask: Optional attention mask [batch_size, num_heads, seq_len, kv_seq_len]
-                 - Must match attention_scores shape for element-wise masking
-                 - True values indicate positions to MASK OUT (set to -∞)
-                 - False values indicate positions to ATTEND TO (keep scores)
-                 - Can broadcast: [batch, 1, seq_len, kv_seq_len] or [1, 1, seq_len, kv_seq_len]
-                 - Mask types by transformer component:
-                   * Padding mask: encoder + decoder (all attention types)
-                   * Causal mask: decoder self-attention only
-                   * Combined mask: decoder cross-attention (both sequence paddings)
-
-        Returns:
-            Output tensor [batch_size, seq_len, d_model]
+        Conditionally uses a fused kernel for performance if not storing attention weights.
         """
+        # --- Input shape validation ---
+        assert query.dim() == 3, f"Query must be a 3D tensor, but got {query.dim()}D"
+        assert key.dim() == 3, f"Key must be a 3D tensor, but got {key.dim()}D"
+        assert value.dim() == 3, f"Value must be a 3D tensor, but got {value.dim()}D"
+        
+        assert query.size(-1) == self.embed_dim, f"Query embed_dim mismatch: expected {self.embed_dim}, got {query.size(-1)}"
+        assert key.size(-1) == self.embed_dim, f"Key embed_dim mismatch: expected {self.embed_dim}, got {key.size(-1)}"
+        assert value.size(-1) == self.embed_dim, f"Value embed_dim mismatch: expected {self.embed_dim}, got {value.size(-1)}"
+        
+        batch_size, seq_len, _ = query.size()
+        assert key.size(0) == batch_size and value.size(0) == batch_size, "Batch sizes of query, key, and value must match"
+        assert key.size(1) == value.size(1), "Sequence lengths of key and value must match"
+
         if self.debug_mode:
             debug_print(query, "query_input", "Query input tensor", "Attention: ")
             debug_print(key, "key_input", "Key input tensor", "Attention: ")
@@ -105,17 +92,10 @@ class MultiHeadAttention(nn.Module):
             if mask is not None:
                 debug_print(mask, "attention_mask", "Attention mask tensor", "Attention: ")
 
-        batch_size, seq_len, _ = query.size()
-        # Note: Key and value must always have the same sequence length (they represent the same input)
-        # Query can have a different length (e.g., in cross-attention: target vs source lengths)
-        _, kv_seq_len, _ = key.size()
-
         # Step 1: Linear projections
-        # Apply learned linear transformations to input embeddings
-        # Q = XW^Q, K = XW^K, V = XW^V where X ∈ ℝ^(batch × seq_len × d_model)
-        Q = self.query_proj(query)  # [batch_size, seq_len, d_model]
-        K = self.key_proj(key)  # [batch_size, kv_seq_len, d_model]
-        V = self.value_proj(value)  # [batch_size, kv_seq_len, d_model]
+        Q = self.query_proj(query)
+        K = self.key_proj(key)
+        V = self.value_proj(value)
 
         if self.debug_mode:
             debug_print(Q, "Q_projected", "Query after linear projection Q = XW^Q", "Attention: ")
@@ -123,127 +103,151 @@ class MultiHeadAttention(nn.Module):
             debug_print(V, "V_projected", "Value after linear projection V = XW^V", "Attention: ")
 
         # Step 2: Reshape for multi-head attention
-        # Split d_model dimension into h heads, each of dimension d_k = d_model/h
-        # Reshape from [batch, seq_len, d_model] to [batch, h, seq_len, d_k]
         Q = Q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        K = K.view(batch_size, kv_seq_len, self.num_heads, self.head_dim).transpose(1, 2)
-        V = V.view(batch_size, kv_seq_len, self.num_heads, self.head_dim).transpose(1, 2)
+        K = K.view(batch_size, key.size(1), self.num_heads, self.head_dim).transpose(1, 2)
+        V = V.view(batch_size, value.size(1), self.num_heads, self.head_dim).transpose(1, 2)
 
         if self.debug_mode:
-            debug_print(
-                Q, "Q_reshaped", "Query reshaped to [batch, h, seq_len, d_k]", "Attention: "
-            )
-            debug_print(
-                K, "K_reshaped", "Key reshaped to [batch, h, kv_seq_len, d_k]", "Attention: "
-            )
-            debug_print(
-                V, "V_reshaped", "Value reshaped to [batch, h, kv_seq_len, d_k]", "Attention: "
-            )
+            debug_print(Q, "Q_reshaped", "Query reshaped to [batch, h, seq_len, d_k]", "Attention: ")
+            debug_print(K, "K_reshaped", "Key reshaped to [batch, h, kv_seq_len, d_k]", "Attention: ")
+            debug_print(V, "V_reshaped", "Value reshaped to [batch, h, kv_seq_len, d_k]", "Attention: ")
 
-        # Step 3: Numerically stable scaled dot-product attention
-        # Replace any NaN/Inf values to prevent propagation
-        Q = torch.where(torch.isfinite(Q), Q, torch.zeros_like(Q))
-        K = torch.where(torch.isfinite(K), K, torch.zeros_like(K))
-        
-        # Compute attention scores with stability checks
-        raw_scores = torch.matmul(Q, K.transpose(-2, -1))
-        raw_scores = torch.where(torch.isfinite(raw_scores), raw_scores, torch.zeros_like(raw_scores))
-        
-        # Scale and clamp to prevent softmax overflow
-        attention_scores = torch.clamp(raw_scores / math.sqrt(self.head_dim), min=-10.0, max=10.0)
-        # Shape: [batch_size, num_heads, seq_len, kv_seq_len]
+        if self.store_attention:
+            # --- Manual Attention Path (for introspection) ---
+            # This path is slower but allows storing attention weights for debugging.
+            
+            # --- Note on Implementation ---
+            # The following block implements scaled dot-product attention manually.
+            # While PyTorch 2.0+ offers a fused and highly optimized function 
+            # (`torch.nn.functional.scaled_dot_product_attention`), this manual
+            # implementation is preserved intentionally.
+            # The primary reason is to allow for the `store_attention` feature,
+            # which provides introspection into the attention weights. The optimized
+            # function does not return attention weights, as it often uses algorithms
+            # like FlashAttention that do not explicitly materialize the attention matrix.
 
-        if self.debug_mode:
-            debug_print(
-                attention_scores,
-                "attention_scores",
-                f"Attention scores QK^T/√d_k with scaling factor 1/√{self.head_dim}",
-                "Attention: ",
-            )
+            # Step 3: Scaled dot-product attention
+            # Compute attention scores
+            raw_scores = torch.matmul(Q, K.transpose(-2, -1))
+            
+            # Scale the scores to prevent softmax overflow
+            attention_scores = raw_scores / math.sqrt(self.head_dim)
+            # Shape: [batch_size, num_heads, seq_len, kv_seq_len]
 
-        # Step 4: Apply attention mask (if provided)
-        # MASK SIZE REQUIREMENTS:
-        # - mask must have shape [batch_size, num_heads, seq_len, kv_seq_len]
-        # - This matches attention_scores shape for element-wise masking
-        # - batch_size: number of sequences in batch
-        # - num_heads: number of attention heads (can broadcast from 1)
-        # - seq_len: query sequence length (rows in attention matrix)
-        # - kv_seq_len: key/value sequence length (columns in attention matrix)
-        #
-        # MASK SEMANTICS:
-        # - True values: positions to MASK OUT (set to -∞, become 0 after softmax)
-        # - False values: positions to ATTEND TO (keep original scores)
-        #
-        # COMMON MASK TYPES BY TRANSFORMER COMPONENT:
-        # - Padding mask: mask out padding tokens [batch, 1, 1, seq_len]
-        #   * Used in: BOTH encoder and decoder (all attention types)
-        #   * Purpose: ignore padding tokens in variable-length sequences
-        # - Causal mask: prevent attention to future tokens [1, 1, seq_len, seq_len]
-        #   * Used in: DECODER ONLY (self-attention)
-        #   * Purpose: maintain autoregressive property during training
-        # - Combined mask: padding + causal masks element-wise OR'd together
-        #   * Used in: DECODER cross-attention (query padding + key padding)
-        #   * Purpose: handle both sequence lengths in encoder-decoder attention
-        #
-        # Mask prevents attention to certain positions by setting scores to -∞
-        # After softmax, these become 0, effectively removing their contribution
-        if mask is not None:
-            # Comprehensive mask validation
-            assert isinstance(mask, torch.Tensor), f"Mask must be torch.Tensor, got {type(mask)}"
-            assert mask.dtype == torch.bool, f"Mask must be boolean tensor, got {mask.dtype}"
-            assert mask.dim() == 4, f"Mask must be 4D tensor [batch, heads, seq_len, kv_seq_len], got {mask.dim()}D"
-            
-            # Shape compatibility checks
-            mask_batch, mask_heads, mask_seq, mask_kv = mask.shape
-            assert mask_batch == 1 or mask_batch == batch_size, f"Mask batch size {mask_batch} must be 1 or {batch_size}"
-            assert mask_heads == 1 or mask_heads == self.num_heads, f"Mask heads {mask_heads} must be 1 or {self.num_heads}"
-            assert mask_seq == 1 or mask_seq == seq_len, f"Mask seq dimension {mask_seq} must be 1 (broadcast) or {seq_len}"
-            assert mask_kv == kv_seq_len, f"Mask kv dimension {mask_kv} must match key/value seq_len {kv_seq_len}"
-            
-            # Device and gradient compatibility
-            assert mask.device == attention_scores.device, f"Mask device {mask.device} must match scores device {attention_scores.device}"
-            assert not mask.requires_grad, "Mask should not require gradients"
-            
-            attention_scores = attention_scores.masked_fill(mask, float("-inf"))
             if self.debug_mode:
                 debug_print(
                     attention_scores,
-                    "masked_attention_scores",
-                    "Attention scores after masking (masked positions set to -∞)",
+                    "attention_scores",
+                    f"Attention scores QK^T/√d_k with scaling factor 1/√{self.head_dim}",
                     "Attention: ",
                 )
 
-        # Step 5: Robust softmax with fallback
-        attention_probs = torch.softmax(attention_scores, dim=-1)
-        
-        # Replace any remaining NaN/Inf with uniform distribution
-        if not torch.isfinite(attention_probs).all():
-            uniform_prob = 1.0 / attention_probs.size(-1)
-            attention_probs = torch.where(torch.isfinite(attention_probs), attention_probs, uniform_prob)
-        # Shape: [batch_size, num_heads, seq_len, kv_seq_len]
+            # Step 4: Apply attention mask (if provided)
+            # MASK SIZE REQUIREMENTS:
+            # - mask must have shape [batch_size, num_heads, seq_len, kv_seq_len]
+            # - This matches attention_scores shape for element-wise masking
+            # - batch_size: number of sequences in batch
+            # - num_heads: number of attention heads (can broadcast from 1)
+            # - seq_len: query sequence length (rows in attention matrix)
+            # - kv_seq_len: key/value sequence length (columns in attention matrix)
+            #
+            # MASK SEMANTICS:
+            # - True values: positions to MASK OUT (set to -∞, become 0 after softmax)
+            # - False values: positions to ATTEND TO (keep original scores)
+            #
+            # COMMON MASK TYPES BY TRANSFORMER COMPONENT:
+            # - Padding mask: mask out padding tokens [batch, 1, 1, seq_len]
+            #   * Used in: BOTH encoder and decoder (all attention types)
+            #   * Purpose: ignore padding tokens in variable-length sequences
+            # - Causal mask: prevent attention to future tokens [1, 1, seq_len, seq_len]
+            #   * Used in: DECODER ONLY (self-attention)
+            #   * Purpose: maintain autoregressive property during training
+            # - Combined mask: padding + causal masks element-wise OR'd together
+            #   * Used in: DECODER cross-attention (query padding + key padding)
+            #   * Purpose: handle both sequence lengths in encoder-decoder attention
+            #
+            # Mask prevents attention to certain positions by setting scores to -∞
+            # After softmax, these become 0, effectively removing their contribution
+            if mask is not None:
+                # Canonicalize mask to a 4D tensor for broadcasting over heads.
+                # Accepted input shapes:
+                # - 2D: [batch_size, kv_seq_len] -> [batch_size, 1, 1, kv_seq_len]
+                # - 3D: [batch_size, seq_len, kv_seq_len] -> [batch_size, 1, seq_len, kv_seq_len]
+                # - 4D: [batch_size, num_heads, seq_len, kv_seq_len] (no-op)
+                if mask.dim() == 2:
+                    mask = mask.unsqueeze(1).unsqueeze(2)
+                elif mask.dim() == 3:
+                    mask = mask.unsqueeze(1)
+                
+                # By this point, mask should be 4D and ready for broadcasting or direct use.
+                assert mask.dim() == 4, f"Attention mask must be 2D, 3D, or 4D, but got {mask.dim()}D"
 
-        if self.debug_mode:
-            debug_print(
-                attention_probs,
-                "attention_probs",
-                "Attention probabilities after softmax normalization",
-                "Attention: ",
-            )
+                # Apply the mask. It can be a boolean mask (True for masked positions)
+                # or a float additive mask (0.0 for keep, -inf for mask).
+                if mask.dtype == torch.bool:
+                    attention_scores = attention_scores.masked_fill(mask, float("-inf"))
+                else:
+                    attention_scores = attention_scores + mask
 
-        # Store attention weights for visualization if requested
-        # Detach from computation graph to avoid affecting gradients
-        if self.store_attention:
+                if self.debug_mode:
+                    debug_print(
+                        attention_scores,
+                        "masked_attention_scores",
+                        "Attention scores after masking",
+                        "Attention: ",
+                    )
+
+            # Step 5: Robust softmax
+            attention_probs = torch.softmax(attention_scores, dim=-1)
+
+            # Check for rows that are not finite, which can happen if all scores
+            # in a row are -inf after masking. Replace these with a uniform distribution.
+            is_bad_row = ~torch.isfinite(attention_probs).all(dim=-1, keepdim=True)
+            uniform_probs = torch.full_like(attention_probs, 1.0 / attention_probs.size(-1))
+            attention_probs = torch.where(is_bad_row, uniform_probs, attention_probs)
+            # Shape: [batch_size, num_heads, seq_len, kv_seq_len]
+
+            if self.debug_mode:
+                debug_print(
+                    attention_probs,
+                    "attention_probs",
+                    "Attention probabilities after softmax normalization",
+                    "Attention: ",
+                )
+
+            # Apply attention dropout for regularization
+            attention_probs = self.attn_dropout(attention_probs)
+
+            # Store attention weights for visualization (path is active because self.store_attention is True)
+            # Detach from computation graph to avoid affecting gradients
             self.last_attention_weights = attention_probs.detach()
 
-        # Step 6: Safe attention application to values
-        V = torch.where(torch.isfinite(V), V, torch.zeros_like(V))
-        context = torch.matmul(attention_probs, V)
-        context = torch.where(torch.isfinite(context), context, torch.zeros_like(context))
-        # Shape: [batch_size, num_heads, seq_len, d_k]
+            # Step 6: Apply attention to values
+            context = torch.matmul(attention_probs, V)
+            # Shape: [batch_size, num_heads, seq_len, d_k]
 
-        if self.debug_mode:
-            debug_print(
-                context, "context", "Context vectors from attention-weighted values", "Attention: "
+            if self.debug_mode:
+                debug_print(
+                    context, "context", "Context vectors from attention-weighted values", "Attention: "
+                )
+
+        else:
+            # --- Fused Attention Path (for performance) ---
+            # This path is faster and more memory-efficient.
+            self.last_attention_weights = None
+            final_mask = None
+            if mask is not None:
+                if mask.dim() == 2: mask = mask.unsqueeze(1).unsqueeze(2)
+                elif mask.dim() == 3: mask = mask.unsqueeze(1)
+                if mask.dtype != torch.bool:
+                    final_mask = mask < 0
+                else:
+                    final_mask = mask
+
+            context = F.scaled_dot_product_attention(
+                Q, K, V,
+                attn_mask=final_mask,
+                dropout_p=self.attn_dropout.p if self.training else 0.0
             )
 
         # Step 7: Concatenate heads and reshape
@@ -259,10 +263,11 @@ class MultiHeadAttention(nn.Module):
                 "Attention: ",
             )
 
-        # Step 8: Final linear projection
+        # Step 8: Final linear projection and dropout
         # Apply output projection matrix W^O to get final output
         # MultiHead(Q,K,V) = Concat(head₁,...,headₕ)W^O
         output = self.out_proj(context)
+        output = self.out_dropout(output)
 
         if self.debug_mode:
             debug_print(
@@ -272,13 +277,12 @@ class MultiHeadAttention(nn.Module):
         return output
     
     def _init_weights(self):
-        """Initialize weights using Xavier/Glorot initialization with proper scaling."""
-        # Xavier initialization with gain=1/sqrt(2) for better stability in deep networks
-        gain = 1.0 / math.sqrt(2.0)
-        nn.init.xavier_uniform_(self.query_proj.weight, gain=gain)
-        nn.init.xavier_uniform_(self.key_proj.weight, gain=gain) 
-        nn.init.xavier_uniform_(self.value_proj.weight, gain=gain)
-        nn.init.xavier_uniform_(self.out_proj.weight, gain=gain)
+        """Initialize weights using the standard Xavier/Glorot initialization."""
+        # Use the default gain of 1.0 for xavier_uniform_, which is standard for linear layers.
+        nn.init.xavier_uniform_(self.query_proj.weight)
+        nn.init.xavier_uniform_(self.key_proj.weight) 
+        nn.init.xavier_uniform_(self.value_proj.weight)
+        nn.init.xavier_uniform_(self.out_proj.weight)
         
         # Initialize biases to zero
         nn.init.zeros_(self.query_proj.bias)
