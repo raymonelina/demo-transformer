@@ -168,7 +168,7 @@ class MultiHeadAttention(nn.Module):
             #   * Purpose: maintain autoregressive property during training
             # - Combined mask: padding + causal masks element-wise OR'd together
             #   * Used in: DECODER self-attention
-            #   * Purpose: handle both sequence lengths in encoder-decoder attention
+            #   * Purpose: simultaneously enforce causality and ignore padding within decoder self-attention.
             #
             # Mask prevents attention to certain positions by setting scores to -∞
             # After softmax, these become 0, effectively removing their contribution
