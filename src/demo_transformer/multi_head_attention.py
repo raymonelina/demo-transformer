@@ -62,7 +62,7 @@ class MultiHeadAttention(nn.Module):
         # Dropout layers
         self.attn_dropout = nn.Dropout(dropout_prob)
         self.out_dropout = nn.Dropout(dropout_prob)
-        
+
         self._init_weights()
 
     def forward(
@@ -77,17 +77,33 @@ class MultiHeadAttention(nn.Module):
         Conditionally uses a fused kernel for performance if not storing attention weights.
         """
         # --- Input shape validation ---
-        assert query.dim() == 3, f"Query must be a 3D tensor, but got {query.dim()}D"
-        assert key.dim() == 3, f"Key must be a 3D tensor, but got {key.dim()}D"
-        assert value.dim() == 3, f"Value must be a 3D tensor, but got {value.dim()}D"
-        
-        assert query.size(-1) == self.embed_dim, f"Query embed_dim mismatch: expected {self.embed_dim}, got {query.size(-1)}"
-        assert key.size(-1) == self.embed_dim, f"Key embed_dim mismatch: expected {self.embed_dim}, got {key.size(-1)}"
-        assert value.size(-1) == self.embed_dim, f"Value embed_dim mismatch: expected {self.embed_dim}, got {value.size(-1)}"
-        
+        assert (
+            query.dim() == 3
+        ), f"Query must be a 3D tensor (batch_size, sequence_length, embed_dim), but got {query.dim()}D"
+        assert (
+            key.dim() == 3
+        ), f"Key must be a 3D tensor (batch_size, sequence_length, embed_dim), but got {key.dim()}D"
+        assert (
+            value.dim() == 3
+        ), f"Value must be a 3D tensor (batch_size, sequence_length, embed_dim), but got {value.dim()}D"
+
         batch_size, seq_len, _ = query.size()
-        assert key.size(0) == batch_size and value.size(0) == batch_size, "Batch sizes of query, key, and value must match"
+
+        assert (
+            key.size(0) == batch_size and value.size(0) == batch_size
+        ), "Batch sizes of query, key, and value must match"
+
         assert key.size(1) == value.size(1), "Sequence lengths of key and value must match"
+
+        assert (
+            query.size(-1) == self.embed_dim
+        ), f"Query embed_dim mismatch: expected {self.embed_dim}, got {query.size(-1)}"
+        assert (
+            key.size(-1) == self.embed_dim
+        ), f"Key embed_dim mismatch: expected {self.embed_dim}, got {key.size(-1)}"
+        assert (
+            value.size(-1) == self.embed_dim
+        ), f"Value embed_dim mismatch: expected {self.embed_dim}, got {value.size(-1)}"
 
         if self.debug_mode:
             debug_print(query, "query_input", "Query input tensor", "Attention: ")
@@ -102,9 +118,13 @@ class MultiHeadAttention(nn.Module):
         V = self.value_proj(value)
 
         if self.debug_mode:
-            debug_print(Q, "Q_projected", "Query after linear projection Q = XW^Q", "Attention: ")
-            debug_print(K, "K_projected", "Key after linear projection K = XW^K", "Attention: ")
-            debug_print(V, "V_projected", "Value after linear projection V = XW^V", "Attention: ")
+            debug_print(
+                Q, "Q_projected", "Query after linear projection Q = query W^Q", "Attention: "
+            )
+            debug_print(K, "K_projected", "Key after linear projection K = key W^K", "Attention: ")
+            debug_print(
+                V, "V_projected", "Value after linear projection V = value W^V", "Attention: "
+            )
 
         # Step 2: Reshape for multi-head attention
         Q = Q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
@@ -112,17 +132,23 @@ class MultiHeadAttention(nn.Module):
         V = V.view(batch_size, value.size(1), self.num_heads, self.head_dim).transpose(1, 2)
 
         if self.debug_mode:
-            debug_print(Q, "Q_reshaped", "Query reshaped to [batch, h, seq_len, d_k]", "Attention: ")
-            debug_print(K, "K_reshaped", "Key reshaped to [batch, h, kv_seq_len, d_k]", "Attention: ")
-            debug_print(V, "V_reshaped", "Value reshaped to [batch, h, kv_seq_len, d_k]", "Attention: ")
+            debug_print(
+                Q, "Q_reshaped", "Query reshaped to [batch, h, seq_len, head_dim]", "Attention: "
+            )
+            debug_print(
+                K, "K_reshaped", "Key reshaped to [batch, h, kv_seq_len, head_dim]", "Attention: "
+            )
+            debug_print(
+                V, "V_reshaped", "Value reshaped to [batch, h, kv_seq_len, head_dim]", "Attention: "
+            )
 
         if self.store_attention:
             # --- Manual Attention Path (for introspection) ---
             # This path is slower but allows storing attention weights for debugging.
-            
+
             # --- Note on Implementation ---
             # The following block implements scaled dot-product attention manually.
-            # While PyTorch 2.0+ offers a fused and highly optimized function 
+            # While PyTorch 2.0+ offers a fused and highly optimized function
             # (`torch.nn.functional.scaled_dot_product_attention`), this manual
             # implementation is preserved intentionally.
             # The primary reason is to allow for the `store_attention` feature,
@@ -133,7 +159,7 @@ class MultiHeadAttention(nn.Module):
             # Step 3: Scaled dot-product attention
             # Compute attention scores
             raw_scores = torch.matmul(Q, K.transpose(-2, -1))
-            
+
             # Scale the scores to prevent softmax overflow
             attention_scores = raw_scores / math.sqrt(self.head_dim)
             # Shape: [batch_size, num_heads, seq_len, kv_seq_len]
@@ -182,9 +208,11 @@ class MultiHeadAttention(nn.Module):
                     mask = mask.unsqueeze(1).unsqueeze(2)
                 elif mask.dim() == 3:
                     mask = mask.unsqueeze(1)
-                
+
                 # By this point, mask should be 4D and ready for broadcasting or direct use.
-                assert mask.dim() == 4, f"Attention mask must be 2D, 3D, or 4D, but got {mask.dim()}D"
+                assert (
+                    mask.dim() == 4
+                ), f"Attention mask must be 2D, 3D, or 4D, but got {mask.dim()}D"
 
                 # Apply the mask. It can be a boolean mask (True for masked positions)
                 # or a float additive mask (0.0 for keep, -inf for mask).
@@ -209,7 +237,9 @@ class MultiHeadAttention(nn.Module):
             # Check for rows that are not finite, which can happen if all scores
             # in a row are -inf after masking. Replace these with zeros.
             is_bad_row = ~torch.isfinite(attention_probs).all(dim=-1, keepdim=True)
-            attention_probs = torch.where(is_bad_row, torch.zeros_like(attention_probs), attention_probs)
+            attention_probs = torch.where(
+                is_bad_row, torch.zeros_like(attention_probs), attention_probs
+            )
             # Shape: [batch_size, num_heads, seq_len, kv_seq_len]
 
             if self.debug_mode:
@@ -233,7 +263,10 @@ class MultiHeadAttention(nn.Module):
 
             if self.debug_mode:
                 debug_print(
-                    context, "context", "Context vectors from attention-weighted values", "Attention: "
+                    context,
+                    "context",
+                    "Context vectors from attention-weighted values",
+                    "Attention: ",
                 )
 
         else:
@@ -243,8 +276,10 @@ class MultiHeadAttention(nn.Module):
             final_mask = None
             if mask is not None:
                 mask = mask.to(Q.device)
-                if mask.dim() == 2: mask = mask.unsqueeze(1).unsqueeze(2)
-                elif mask.dim() == 3: mask = mask.unsqueeze(1)
+                if mask.dim() == 2:
+                    mask = mask.unsqueeze(1).unsqueeze(2)
+                elif mask.dim() == 3:
+                    mask = mask.unsqueeze(1)
                 if mask.dtype != torch.bool:
                     final_mask = mask.to(Q.dtype)
                     # Note: When using float16/bfloat16, large negative values in the additive mask
@@ -254,9 +289,11 @@ class MultiHeadAttention(nn.Module):
                     final_mask = mask
 
             context = F.scaled_dot_product_attention(
-                Q, K, V,
+                Q,
+                K,
+                V,
                 attn_mask=final_mask,
-                dropout_p=self.attn_dropout.p if self.training else 0.0
+                dropout_p=self.attn_dropout.p if self.training else 0.0,
             )
 
         # Step 7: Concatenate heads and reshape
@@ -284,15 +321,15 @@ class MultiHeadAttention(nn.Module):
             )
 
         return output
-    
+
     def _init_weights(self):
         """Initialize weights using the standard Xavier/Glorot initialization."""
         # Use the default gain of 1.0 for xavier_uniform_, which is standard for linear layers.
         nn.init.xavier_uniform_(self.query_proj.weight)
-        nn.init.xavier_uniform_(self.key_proj.weight) 
+        nn.init.xavier_uniform_(self.key_proj.weight)
         nn.init.xavier_uniform_(self.value_proj.weight)
         nn.init.xavier_uniform_(self.out_proj.weight)
-        
+
         # Initialize biases to zero
         nn.init.zeros_(self.query_proj.bias)
         nn.init.zeros_(self.key_proj.bias)
