@@ -142,6 +142,59 @@ class MultiHeadAttention(nn.Module):
                 V, "V_reshaped", "Value reshaped to [batch, h, kv_seq_len, head_dim]", "Attention: "
             )
 
+        # Step 3: Prepare attention mask
+        # MASKING IN THE TRANSFORMER ARCHITECTURE:
+        # A standard Encoder-Decoder Transformer uses three distinct masking scenarios that work together:
+        #
+        # 1. Encoder Self-Attention (Source Padding Mask):
+        #    - When processing the source sequence, a padding mask is used to prevent the encoder from
+        #      attending to meaningless padding tokens. The output of this stage (K, V) is passed to the decoder.
+        #
+        # 2. Decoder Self-Attention (Target Combined Mask):
+        #    - When processing the target sequence generated so far, the decoder uses a combined causal
+        #      and padding mask. This prevents it from "cheating" by looking at future tokens while also
+        #      ignoring padding. The output of this stage is the query (Q) for the next step.
+        #
+        # 3. Decoder Cross-Attention (Source Padding Mask again):
+        #    - The decoder combines its query (Q) from self-attention with the keys (K) and values (V)
+        #      from the encoder. It uses the same source padding mask from step 1. This allows the
+        #      decoder to look at the entire source sentence to make its prediction, while still
+        #      ignoring the source padding. A causal mask is NOT used here.
+        #
+        # --- MASK DETAILS ---
+        #
+        # MASK SHAPE & BROADCASTING:
+        # The mask is broadcastable to the shape of the attention scores: [batch_size, num_heads, seq_len, kv_seq_len].
+        # Common input shapes that are broadcast automatically:
+        # - 2D Padding Mask: [batch_size, kv_seq_len]
+        # - 3D Combined Mask: [batch_size, seq_len, kv_seq_len]
+        #
+        # MASK SEMANTICS:
+        # - A `True` value or a large negative number (like -inf) indicates a position should be MASKED OUT.
+        # - Masked positions have their attention scores set to -∞, making their contribution 0 after softmax.
+        final_mask = None
+        if mask is not None:
+            # Canonicalize mask to a 4D tensor for broadcasting over heads.
+            # Accepted input shapes:
+            # - 2D: [batch_size, kv_seq_len] -> [batch_size, 1, 1, kv_seq_len]
+            # - 3D: [batch_size, seq_len, kv_seq_len] -> [batch_size, 1, seq_len, kv_seq_len]
+            # - 4D: [batch_size, num_heads, seq_len, kv_seq_len] (no-op)
+            if mask.dim() == 2:
+                final_mask = mask.unsqueeze(1).unsqueeze(2)
+            elif mask.dim() == 3:
+                final_mask = mask.unsqueeze(1)
+            elif mask.dim() == 4:
+                final_mask = mask
+            else:
+                raise ValueError(f"Attention mask must be 2D, 3D, or 4D, but got {mask.dim()}D")
+
+            # By this point, mask should be 4D and ready for broadcasting or direct use.
+            assert (
+                final_mask.dim() == 4
+            ), f"Attention mask must be 2D, 3D, or 4D, but got {final_mask.dim()}D"
+
+            final_mask = final_mask.to(Q.device)
+
         if self.store_attention:
             # --- Manual Attention Path (for introspection) ---
             # This path is slower but allows storing attention weights for debugging.
@@ -156,7 +209,7 @@ class MultiHeadAttention(nn.Module):
             # function does not return attention weights, as it often uses algorithms
             # like FlashAttention that do not explicitly materialize the attention matrix.
 
-            # Step 3: Scaled dot-product attention
+            # Step 4: Scaled dot-product attention
             # Compute attention scores
             raw_scores = torch.matmul(Q, K.transpose(-2, -1))
 
@@ -172,56 +225,14 @@ class MultiHeadAttention(nn.Module):
                     "Attention: ",
                 )
 
-            # Step 4: Apply attention mask (if provided)
-            # MASK SIZE REQUIREMENTS:
-            # - mask must have shape [batch_size, num_heads, seq_len, kv_seq_len]
-            # - This matches attention_scores shape for element-wise masking
-            # - batch_size: number of sequences in batch
-            # - num_heads: number of attention heads (can broadcast from 1)
-            # - seq_len: query sequence length (rows in attention matrix)
-            # - kv_seq_len: key/value sequence length (columns in attention matrix)
-            #
-            # MASK SEMANTICS:
-            # - True values: positions to MASK OUT (set to -∞, become 0 after softmax)
-            # - False values: positions to ATTEND TO (keep original scores)
-            #
-            # COMMON MASK TYPES BY TRANSFORMER COMPONENT:
-            # - Padding mask: mask out padding tokens [batch, 1, 1, seq_len]
-            #   * Used in: BOTH encoder and decoder (all attention types)
-            #   * Purpose: ignore padding tokens in variable-length sequences
-            # - Causal mask: prevent attention to future tokens [1, 1, seq_len, seq_len]
-            #   * Used in: DECODER ONLY (self-attention)
-            #   * Purpose: maintain autoregressive property during training
-            # - Combined mask: padding + causal masks element-wise OR'd together
-            #   * Used in: DECODER self-attention
-            #   * Purpose: simultaneously enforce causality and ignore padding within decoder self-attention.
-            #
-            # Mask prevents attention to certain positions by setting scores to -∞
-            # After softmax, these become 0, effectively removing their contribution
-            if mask is not None:
-                # Canonicalize mask to a 4D tensor for broadcasting over heads.
-                # Accepted input shapes:
-                # - 2D: [batch_size, kv_seq_len] -> [batch_size, 1, 1, kv_seq_len]
-                # - 3D: [batch_size, seq_len, kv_seq_len] -> [batch_size, 1, seq_len, kv_seq_len]
-                # - 4D: [batch_size, num_heads, seq_len, kv_seq_len] (no-op)
-                if mask.dim() == 2:
-                    mask = mask.unsqueeze(1).unsqueeze(2)
-                elif mask.dim() == 3:
-                    mask = mask.unsqueeze(1)
-
-                # By this point, mask should be 4D and ready for broadcasting or direct use.
-                assert (
-                    mask.dim() == 4
-                ), f"Attention mask must be 2D, 3D, or 4D, but got {mask.dim()}D"
-
+            # Step 5: Apply attention mask (if provided)
+            if final_mask is not None:
                 # Apply the mask. It can be a boolean mask (True for masked positions)
                 # or a float additive mask (0.0 for keep, -inf for mask).
-                if mask.dtype == torch.bool:
-                    mask = mask.to(Q.device)
-                    attention_scores = attention_scores.masked_fill(mask, float("-inf"))
+                if final_mask.dtype == torch.bool:
+                    attention_scores = attention_scores.masked_fill(final_mask, float("-inf"))
                 else:
-                    mask = mask.to(Q.device).to(attention_scores.dtype)
-                    attention_scores = attention_scores + mask
+                    attention_scores = attention_scores + final_mask.to(attention_scores.dtype)
 
                 if self.debug_mode:
                     debug_print(
@@ -231,7 +242,7 @@ class MultiHeadAttention(nn.Module):
                         "Attention: ",
                     )
 
-            # Step 5: Robust softmax
+            # Step 6: Robust softmax
             attention_probs = torch.softmax(attention_scores, dim=-1)
 
             # Check for rows that are not finite, which can happen if all scores
@@ -257,7 +268,7 @@ class MultiHeadAttention(nn.Module):
             # Apply attention dropout for regularization
             attention_probs = self.attn_dropout(attention_probs)
 
-            # Step 6: Apply attention to values
+            # Step 7: Apply attention to values
             context = torch.matmul(attention_probs, V)
             # Shape: [batch_size, num_heads, seq_len, d_k]
 
@@ -273,20 +284,11 @@ class MultiHeadAttention(nn.Module):
             # --- Fused Attention Path (for performance) ---
             # This path is faster and more memory-efficient.
             self.last_attention_weights = None
-            final_mask = None
-            if mask is not None:
-                mask = mask.to(Q.device)
-                if mask.dim() == 2:
-                    mask = mask.unsqueeze(1).unsqueeze(2)
-                elif mask.dim() == 3:
-                    mask = mask.unsqueeze(1)
-                if mask.dtype != torch.bool:
-                    final_mask = mask.to(Q.dtype)
-                    # Note: When using float16/bfloat16, large negative values in the additive mask
-                    # will saturate to the minimum representable value, effectively behaving like -inf.
-                    # This can change the semantics compared to float32 where magnitudes are preserved.
-                else:
-                    final_mask = mask
+            if final_mask is not None and final_mask.dtype != torch.bool:
+                final_mask = final_mask.to(Q.dtype)
+                # Note: When using float16/bfloat16, large negative values in the additive mask
+                # will saturate to the minimum representable value, effectively behaving like -inf.
+                # This can change the semantics compared to float32 where magnitudes are preserved.
 
             context = F.scaled_dot_product_attention(
                 Q,
