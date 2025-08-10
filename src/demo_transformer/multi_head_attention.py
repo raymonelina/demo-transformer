@@ -247,6 +247,9 @@ class MultiHeadAttention(nn.Module):
                 elif mask.dim() == 3: mask = mask.unsqueeze(1)
                 if mask.dtype != torch.bool:
                     final_mask = mask.to(Q.dtype)
+                    # Note: When using float16/bfloat16, large negative values in the additive mask
+                    # will saturate to the minimum representable value, effectively behaving like -inf.
+                    # This can change the semantics compared to float32 where magnitudes are preserved.
                 else:
                     final_mask = mask
 
