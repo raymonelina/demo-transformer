@@ -323,23 +323,32 @@ class TransformerDecoder(nn.Module):
         #  [0, 0, 0, 0, 0]]   # pos 4 can see all previous
         causal_mask = self.generate_square_subsequent_mask(target_seq_len, target_ids.device)
 
-        # Combine causal mask with padding mask if provided
-        # tgt_padding_mask: [batch_size, 1, tgt_seq_len, tgt_seq_len] - RECTANGULAR shape
-        # Only masks PAD tokens (example with 2 PAD tokens at end):
-        # [[0, 0, 0, 1, 1],   # all positions: valid tokens=0, PAD=1
+        # Combine causal mask with padding mask if provided.
+        # The resulting `tgt_mask` prevents attention to both future tokens (causal) and padding tokens.
+        #
+        # Example for a sequence of 5 tokens where the last two are padding:
+        #
+        # Causal Mask (prevents seeing future tokens):
+        # [[0, 1, 1, 1, 1],
+        #  [0, 0, 1, 1, 1],
+        #  [0, 0, 0, 1, 1],
+        #  [0, 0, 0, 0, 1],
+        #  [0, 0, 0, 0, 0]]
+        #
+        # Padding Mask (prevents seeing padding tokens at positions 3 and 4):
+        # [[0, 0, 0, 1, 1],
         #  [0, 0, 0, 1, 1],
         #  [0, 0, 0, 1, 1],
         #  [0, 0, 0, 1, 1],
         #  [0, 0, 0, 1, 1]]
+        #
+        # Combined Mask (causal_mask | tgt_padding_mask):
+        # [[0, 1, 1, 1, 1],
+        #  [0, 0, 1, 1, 1],
+        #  [0, 0, 0, 1, 1],
+        #  [0, 0, 0, 1, 1],
+        #  [0, 0, 0, 1, 1]]
         tgt_mask = causal_mask
-
-        # Final tgt_mask: TRIANGULAR + padding = both causal and PAD masking
-        # Combined result (causal_mask | tgt_padding_mask):
-        # [[0, 1, 1, 1, 1],   # pos 0: causal + PAD masking
-        #  [0, 0, 1, 1, 1],   # pos 1: causal + PAD masking
-        #  [0, 0, 0, 1, 1],   # pos 2: causal + PAD masking
-        #  [0, 0, 0, 1, 1],   # pos 3: only PAD masking (causal allows pos 3)
-        #  [0, 0, 0, 1, 1]]   # pos 4: only PAD masking (causal allows all)
         if tgt_padding_mask is not None:
             tgt_mask = tgt_mask | tgt_padding_mask  # OR operation combines both masks
 
