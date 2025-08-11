@@ -391,9 +391,12 @@ class Transformer(nn.Module):
             tgt_ids: Partial target sequence [batch_size, current_seq_len]
             encoder_output: Pre-computed encoder output [batch_size, src_seq_len, embed_dim]
             src_padding_mask: Source padding mask [batch_size, 1, 1, src_seq_len]
+            tgt_padding_mask: Target padding mask [batch_size, 1, current_seq_len, current_seq_len]
             
         Returns:
-            Decoder logits [batch_size, current_seq_len, tgt_vocab_size]
+            Decoder logits [batch_size, current_seq_len, tgt_vocab_size]: Raw, unnormalized scores
+                for each token in the vocabulary at each position. To get probabilities,
+                apply a softmax function to the last dimension.
         """
         return self.decoder(tgt_ids, encoder_output, src_padding_mask, tgt_padding_mask)
 
