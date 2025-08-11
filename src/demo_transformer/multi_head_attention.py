@@ -298,7 +298,7 @@ class MultiHeadAttention(nn.Module):
                 dropout_p=self.attn_dropout.p if self.training else 0.0,
             )
 
-        # Step 7: Concatenate heads and reshape
+        # Step 8: Concatenate heads and reshape
         # Transpose back to [batch, seq_len, num_heads, d_k] then reshape to [batch, seq_len, d_model]
         # This implements the Concat operation: Concat(head₁, ..., headₕ)
         context = context.transpose(1, 2).contiguous().view(batch_size, seq_len, self.embed_dim)
@@ -311,7 +311,7 @@ class MultiHeadAttention(nn.Module):
                 "Attention: ",
             )
 
-        # Step 8: Final linear projection and dropout
+        # Step 9: Final linear projection and dropout
         # Apply output projection matrix W^O to get final output
         # MultiHead(Q,K,V) = Concat(head₁,...,headₕ)W^O
         output = self.out_proj(context)
