@@ -381,11 +381,17 @@ class Transformer(nn.Module):
         Called iteratively during autoregressive generation, where the sequence grows one token
         at a time: [SOS] → [SOS, token1] → [SOS, token1, token2] → ...
         
-        Inference usage:
+        Inference usage (Greedy Search):
+        The example below shows "greedy search", where we always choose the single most likely
+        next token. This is simple and fast, but may not produce the optimal sequence.
+        
         for step in range(max_len):
             current_seq = [SOS, generated_token1, generated_token2, ...]  # Growing sequence
             logits = model.decode(current_seq, encoder_output, src_padding_mask)
             next_token = argmax(logits[:, -1, :])  # Only use prediction for last position
+        
+        A more advanced method is "beam search", which explores multiple potential sequences
+        simultaneously and often yields better results.
             
         Args:
             tgt_ids: Partial target sequence [batch_size, current_seq_len]
